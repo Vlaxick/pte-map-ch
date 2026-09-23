@@ -4,7 +4,8 @@ const IMAGERY_CREDIT = 'Imagery: Esri, Vantor, Earthstar Geographics, GIS User C
 const OCHA_CREDIT = '<a href="https://gis.unocha.org/server/rest/services/Hosted/UKR_Simplified_Boundaries/FeatureServer" target="_blank" rel="noopener noreferrer">Boundaries: OCHA</a>';
 const EXTERNAL_COUNTRIES = ['RUS', 'BLR', 'POL', 'SVK', 'HUN', 'ROU', 'MDA'];
 const EXTERNAL_CREDIT = '<a href="https://www.geoboundaries.org/" target="_blank" rel="noopener noreferrer">External regions: geoBoundaries gbOpen</a>';
-const ALERTS_URL = './data/alerts.json';
+const NEPTUN_API = 'https://neptun.in.ua/api/v1';
+const POLL_INTERVAL_MS = 15000;
 
 let map;
 let allBounds;
@@ -12,14 +13,19 @@ let regionMeta = [];
 let selectedCode = null;
 let regionLayers = new Map();
 let labelMarkers = new Map();
-let districtsByCode = new Map();
+let alertRaionsByKey = new Map();
+let alertOblastsByKey = new Map();
 let alertLayer;
+let threatLayer;
 let countryBorderLayer;
 let externalRegionLabels = [];
 let mapStyle = 'satellite';
 let alertState = 'disconnected';
-let activeDistrictCodes = [];
-let regionPcodes = new Map();
+let activeRaions = [];
+let activeOblasts = [];
+let activeThreats = [];
+let threatState = 'disconnected';
+let refreshInFlight = false;
 
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, char => ({
@@ -63,12 +69,27 @@ function setMapStyle(style) {
   try { localStorage.setItem('obriy-map-style', mapStyle); } catch {}
 }
 
-function setStatus(state, count = 0) {
+function regionKey(value) {
+  return String(value || '').toLocaleLowerCase('uk').replace(/\s+область$/, '')
+    .replace(/^м\.\s*/, '').trim();
+}
+
+function isFresh(value, maxAgeMs) {
+  const age = Date.now() - Date.parse(value);
+  return Number.isFinite(age) && age >= -60000 && age <= maxAgeMs;
+}
+
+function setStatus() {
   const status = $('topStatus');
-  status.classList.toggle('connected', state === 'connected');
+  status.classList.toggle('connected', alertState === 'connected');
+  const message = alertState === 'connected'
+    ? `NEPTUN · ${activeRaions.length} РАЙОНІВ · ${activeOblasts.length} ОБЛАСТЕЙ · ${threatState === 'connected' ? activeThreats.length + ' ЗАГРОЗ' : 'ЗАГРОЗИ НЕДОСТУПНІ'}`
+    : alertState === 'stale' ? 'ДАНІ ПРО ТРИВОГИ ЗАСТАРІЛИ' : 'ДАНІ ПРО ТРИВОГИ НЕДОСТУПНІ';
   status.innerHTML = '<span class="status-dot"></span> ' +
-    (state === 'connected' ? `АКТИВНІ ТРИВОГИ У РАЙОНАХ: ${count}` :
-      state === 'stale' ? 'ДАНІ ПРО ТРИВОГИ ЗАСТАРІЛИ' : 'ДАНІ ПРО ТРИВОГИ НЕ ПІДКЛЮЧЕНІ');
+    message;
+  $('sourceStatus').textContent = alertState === 'connected'
+    ? threatState === 'connected' ? 'Дані оновлюються' : 'Тривоги оновлюються · загрози недоступні'
+    : message.toLocaleLowerCase('uk');
 }
 
 function renderSelectedCard() {
@@ -78,15 +99,18 @@ function renderSelectedCard() {
     card.hidden = true;
     return;
   }
-  const activeNames = activeDistrictCodes
-    .map(code => districtsByCode.get(code))
-    .filter(district => district?.properties.adm1_pcode === regionPcodes.get(selectedCode))
-    .map(district => district.properties.adm2_name1);
+  const key = regionKey(region.name);
+  const activeNames = activeRaions
+    .filter(raion => regionKey(raion.oblast) === key)
+    .map(raion => raion.name);
+  const oblastAlert = activeOblasts.find(oblast => regionKey(oblast.oblast || oblast.name) === key);
+  const threatCount = activeThreats.filter(threat => regionKey(threat.region) === key).length;
   const message = alertState !== 'connected'
     ? 'Свіжі дані про тривоги зараз недоступні.'
-    : activeNames.length
-      ? 'Активна тривога: ' + activeNames.join(', ') + '.'
-      : 'Активних районних тривог за підключеним джерелом немає.';
+    : [oblastAlert ? `Тривога в області (${oblastAlert.level === 'red' ? 'червоний' : 'жовтий'} рівень).` : '',
+      activeNames.length ? `Райони з тривогою: ${activeNames.join(', ')}.` : '',
+      threatState === 'connected' && threatCount ? `Повідомлень про загрози в регіоні: ${threatCount}.` : '']
+      .filter(Boolean).join(' ') || 'Активних тривог за даними Neptun немає.';
   card.innerHTML = `<div class="card-head"><span>РЕГІОН / ${escapeHtml(selectedCode)}</span><button aria-label="Закрити">×</button></div>
     <h2>${escapeHtml(region.name)}</h2>
     <p>${escapeHtml(message)}</p>`;
@@ -256,35 +280,99 @@ async function addExternalRegions() {
   }
 }
 
-function renderAlertDistricts(data) {
+function alertStyle(level, oblast = false) {
+  const red = level === 'red';
+  return {
+    pane: 'alerts', color: red ? '#ff837a' : '#f5ce77', weight: oblast ? 2.2 : 2.6,
+    opacity: 0.95, fillColor: red ? '#d34347' : '#c99839',
+    fillOpacity: oblast ? 0.21 : 0.32
+  };
+}
+
+function renderAlerts(data) {
   alertLayer.clearLayers();
-  const updatedAt = Date.parse(data?.updatedAt);
-  const age = Date.now() - updatedAt;
-  const fresh = Number.isFinite(age) && age >= -60000 && age <= 180000;
-  alertState = data?.connected !== true ? 'disconnected' : fresh ? 'connected' : 'stale';
-  const active = alertState === 'connected' && Array.isArray(data.activeDistrictCodes)
-    ? [...new Set(data.activeDistrictCodes)].filter(code => districtsByCode.has(code))
-    : [];
-  activeDistrictCodes = active;
-  for (const code of active) {
-    const district = districtsByCode.get(code);
-    L.geoJSON(district, {
-      pane: 'alerts', interactive: false,
-      style: { color: '#ffd590', weight: 2.5, opacity: 1, fillColor: '#ec6e48', fillOpacity: 0.42 }
-    }).addTo(alertLayer);
+  // updatedAt marks the last alert change, so an unchanged live snapshot can be older than a polling cycle.
+  alertState = data && Array.isArray(data.raions) && Array.isArray(data.oblasts) &&
+    Number.isFinite(Date.parse(data.updatedAt)) ? 'connected' : 'disconnected';
+  activeRaions = [];
+  activeOblasts = [];
+  if (alertState === 'connected') {
+    const seenOblasts = new Set();
+    for (const oblast of data.oblasts) {
+      const feature = alertOblastsByKey.get(regionKey(oblast.key));
+      if (!feature || seenOblasts.has(oblast.key)) continue;
+      seenOblasts.add(oblast.key);
+      activeOblasts.push(oblast);
+      L.geoJSON(feature, { pane: 'alerts', interactive: false,
+        style: alertStyle(oblast.level, true) }).addTo(alertLayer);
+    }
+    const seenRaions = new Set();
+    for (const raion of data.raions) {
+      const feature = alertRaionsByKey.get(regionKey(raion.key));
+      if (!feature || seenRaions.has(raion.key)) continue;
+      seenRaions.add(raion.key);
+      activeRaions.push(raion);
+      L.geoJSON(feature, { pane: 'alerts', interactive: false,
+        style: alertStyle(raion.level) }).addTo(alertLayer);
+    }
   }
-  setStatus(alertState, active.length);
+  setStatus();
   renderSelectedCard();
 }
 
-async function refreshAlerts() {
+function renderThreats(data) {
+  threatLayer.clearLayers();
+  threatState = data && Array.isArray(data.threats) && isFresh(data.serverTime, 120000)
+    ? 'connected' : data ? 'stale' : 'disconnected';
+  activeThreats = threatState === 'connected'
+    ? data.threats.filter(threat => threat.status === 'active' && isFresh(threat.updatedAt, 1800000))
+    : [];
+  for (const threat of activeThreats) {
+    // Area-only coordinates are an oblast centroid, never a verified object position.
+    if (threat.areaOnly || threat.lat == null || threat.lon == null ||
+        !Number.isFinite(Number(threat.lat)) || !Number.isFinite(Number(threat.lon))) continue;
+    const approximate = threat.positionQuality !== 'precise' || Number(threat.uncertaintyKm) > 0;
+    const advisory = threat.advisory === true;
+    const color = advisory ? '#9ab5c0' : threat.type === 'ballistic' || threat.type === 'missile'
+      ? '#fa8180' : '#f1c980';
+    const marker = L.circleMarker([Number(threat.lat), Number(threat.lon)], {
+      pane: 'threats', radius: advisory ? 5 : 7, color, weight: 2,
+      fillColor: color, fillOpacity: advisory ? 0.36 : 0.65,
+      dashArray: approximate ? '3 3' : undefined
+    }).addTo(threatLayer);
+    const quality = approximate ? 'Приблизне місце' : 'Повідомлене місце';
+    const uncertainty = Number(threat.uncertaintyKm) > 0
+      ? ` · похибка до ${escapeHtml(threat.uncertaintyKm)} км` : '';
+    const category = advisory ? 'Спостереження' : 'Загроза';
+    marker.bindPopup(`<strong>${escapeHtml(threat.title || category)}</strong><br>${category} · ${quality}${uncertainty}<br>${escapeHtml(threat.region || '')}<br><small>Джерело: NEPTUN · ${escapeHtml(threat.updatedAt || '')}</small>`);
+  }
+  setStatus();
+  renderSelectedCard();
+}
+
+async function getNeptun(path) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
   try {
-    const response = await fetch(ALERTS_URL + '?t=' + Date.now(), { cache: 'no-store' });
-    if (!response.ok) throw new Error('Alert source unavailable');
-    renderAlertDistricts(await response.json());
-  } catch (error) {
-    renderAlertDistricts({ connected: false, activeDistrictCodes: [] });
-    console.warn(error);
+    const response = await fetch(`${NEPTUN_API}/${path}`, { signal: controller.signal, cache: 'no-store' });
+    if (!response.ok) throw new Error(`Neptun ${path}: HTTP ${response.status}`);
+    return await response.json();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function refreshLiveData() {
+  if (refreshInFlight) return;
+  refreshInFlight = true;
+  try {
+    const [alerts, threats] = await Promise.allSettled([getNeptun('alerts'), getNeptun('threats')]);
+    renderAlerts(alerts.status === 'fulfilled' ? alerts.value : null);
+    renderThreats(threats.status === 'fulfilled' ? threats.value : null);
+    if (alerts.status === 'rejected') console.warn('Neptun alerts unavailable', alerts.reason);
+    if (threats.status === 'rejected') console.warn('Neptun threats unavailable', threats.reason);
+  } finally {
+    refreshInFlight = false;
   }
 }
 
@@ -317,7 +405,7 @@ async function init() {
     worldCopyJump: true
   });
   L.control.attribution({ prefix: false, position: 'bottomright' }).addTo(map);
-  for (const [name, zIndex] of [['externalRegions', 375], ['externalBorders', 385], ['externalLabels', 390], ['provinces', 410], ['countryBorder', 430], ['alerts', 450], ['labels', 650]]) {
+  for (const [name, zIndex] of [['externalRegions', 375], ['externalBorders', 385], ['externalLabels', 390], ['provinces', 410], ['countryBorder', 430], ['alerts', 450], ['threats', 470], ['labels', 650]]) {
     map.createPane(name).style.zIndex = zIndex;
   }
   map.getPane('externalRegions').style.pointerEvents = 'none';
@@ -329,13 +417,15 @@ async function init() {
   try {
     const urls = [
       './data/ocha-adm0.geojson', './data/ocha-adm1.geojson',
-      './data/ocha-adm2.geojson', './data/map-regions.json'
+      './data/map-regions.json', './data/neptun-raions.geojson',
+      './data/neptun-oblasts.geojson'
     ];
     const responses = await Promise.all(urls.map(url => fetch(url)));
     if (responses.some(response => !response.ok)) throw new Error('Boundary data unavailable');
-    const [country, provinces, districts, metadata] = await Promise.all(responses.map(response => response.json()));
+    const [country, provinces, metadata, raions, oblasts] = await Promise.all(responses.map(response => response.json()));
     regionMeta = metadata;
-    for (const feature of districts.features) districtsByCode.set(feature.properties.adm2_pcode, feature);
+    for (const feature of raions.features) alertRaionsByKey.set(regionKey(feature.properties.key), feature);
+    for (const feature of oblasts.features) alertOblastsByKey.set(regionKey(feature.properties.key), feature);
     addUkraineImagery(country.features[0].geometry);
     countryBorderLayer = L.geoJSON(country, {
       pane: 'countryBorder', interactive: false,
@@ -349,7 +439,6 @@ async function init() {
         const aliases = { UA01:'UA-43', UA44:'UA-09', UA73:'UA-77', UA80:'UA-30', UA85:'UA-40' };
         const code = aliases[pcode] || pcode.slice(0, 2) + '-' + pcode.slice(2);
         regionLayers.set(code, layer);
-        regionPcodes.set(code, pcode);
         layer.on('click', () => selectRegion(code));
         layer.on('add', () => {
           const element = layer.getElement();
@@ -368,6 +457,7 @@ async function init() {
       }
     }).addTo(map);
     alertLayer = L.layerGroup().addTo(map);
+    threatLayer = L.layerGroup().addTo(map);
     allBounds = L.geoJSON(country).getBounds();
     const fitAll = () => {
       const compact = map.getSize().x < 600;
@@ -415,8 +505,8 @@ async function init() {
     document.addEventListener('keydown', event => {
       if (event.key === 'Escape') selectRegion(null);
     });
-    await refreshAlerts();
-    setInterval(refreshAlerts, 30000);
+    await refreshLiveData();
+    setInterval(refreshLiveData, POLL_INTERVAL_MS);
   } catch (error) {
     $('topStatus').textContent = 'Не вдалося завантажити межі карти';
     console.error(error);

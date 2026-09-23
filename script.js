@@ -26,6 +26,7 @@ let labelMarkers = new Map();
 let alertRaionsByKey = new Map();
 let alertOblastsByKey = new Map();
 let alertLayer;
+let alertRenderer;
 let threatLayer;
 let countryBorderLayer;
 let provinceBorderLayer;
@@ -315,13 +316,34 @@ async function addExternalRegions() {
 function alertStyle(level, oblast = false, name = '') {
   const red = level === 'red';
   const key = regionKey(name);
-  const flagFill = red && /луган/.test(key) ? '#347bc5' :
-    red && /крим/.test(key) ? '#d4ad3c' : null;
+  const flagFill = red && (/луган/.test(key) || /крим/.test(key));
   return {
     pane: 'alerts', color: red ? '#c7837d' : '#c4a465', weight: flagFill ? 2 : oblast ? 1.45 : 1.25,
-    opacity: 0.8, fillColor: flagFill || (red ? '#913f45' : '#9a7127'),
+    opacity: 0.8, fillColor: flagFill ? 'url(#ukraine-alert-flag)' : (red ? '#913f45' : '#9a7127'),
     fillOpacity: oblast ? 0.62 : 0.67
   };
+}
+
+function addFlagFill() {
+  const svg = map.getPane('alerts').querySelector('svg');
+  if (!svg || svg.querySelector('#ukraine-alert-flag')) return;
+  const namespace = 'http://www.w3.org/2000/svg';
+  const defs = document.createElementNS(namespace, 'defs');
+  const gradient = document.createElementNS(namespace, 'linearGradient');
+  gradient.setAttribute('id', 'ukraine-alert-flag');
+  gradient.setAttribute('x1', '0');
+  gradient.setAttribute('y1', '0');
+  gradient.setAttribute('x2', '0');
+  gradient.setAttribute('y2', '1');
+  for (const [offset, color] of [['0%', '#347bc5'], ['50%', '#347bc5'],
+    ['50%', '#d4ad3c'], ['100%', '#d4ad3c']]) {
+    const stop = document.createElementNS(namespace, 'stop');
+    stop.setAttribute('offset', offset);
+    stop.setAttribute('stop-color', color);
+    gradient.appendChild(stop);
+  }
+  defs.appendChild(gradient);
+  svg.insertBefore(defs, svg.firstChild);
 }
 
 function renderAlerts(data) {
@@ -338,7 +360,7 @@ function renderAlerts(data) {
       if (!feature || seenOblasts.has(oblast.key)) continue;
       seenOblasts.add(oblast.key);
       activeOblasts.push(oblast);
-      L.geoJSON(feature, { pane: 'alerts', interactive: false,
+      L.geoJSON(feature, { pane: 'alerts', renderer: alertRenderer, interactive: false,
         style: alertStyle(oblast.level, true, oblast.oblast || oblast.name || oblast.key) }).addTo(alertLayer);
     }
     const seenRaions = new Set();
@@ -347,10 +369,11 @@ function renderAlerts(data) {
       if (!feature || seenRaions.has(raion.key)) continue;
       seenRaions.add(raion.key);
       activeRaions.push(raion);
-      L.geoJSON(feature, { pane: 'alerts', interactive: false,
+      L.geoJSON(feature, { pane: 'alerts', renderer: alertRenderer, interactive: false,
         style: alertStyle(raion.level, false, raion.oblast || raion.key) }).addTo(alertLayer);
     }
   }
+  addFlagFill();
   setStatus();
   renderSelectedCard();
 }
@@ -681,6 +704,7 @@ async function init() {
       pane: 'provinceOutlines', interactive: false,
       style: provinceOutlineStyle
     }).addTo(map);
+    alertRenderer = L.svg({ pane: 'alerts' }).addTo(map);
     alertLayer = L.layerGroup().addTo(map);
     threatLayer = L.layerGroup().addTo(map);
     settlementLayer = L.layerGroup().addTo(map);

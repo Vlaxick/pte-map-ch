@@ -1,19 +1,19 @@
 :root{
   font-family:Manrope,system-ui,sans-serif;
-  color:#e6eceb;
-  background:#0b1114;
+  color:#e2eae6;
+  background:#10191c;
 }
 *{box-sizing:border-box}
 html,body{margin:0;width:100%;height:100%;overflow:hidden}
 button,input{font:inherit}
 button{cursor:pointer}
 button:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid #dfc88b;outline-offset:3px}
-.app{position:relative;width:100%;height:100dvh;overflow:hidden;background:#0b1114}
+.app{position:relative;width:100%;height:100dvh;overflow:hidden;background:#10191c}
 .map{position:absolute;inset:0}
-.leaflet-container{background:#0b1114;font:inherit}
+.leaflet-container{background:#10191c;font:inherit}
 .leaflet-pane path.leaflet-interactive:focus{outline:none}
 .leaflet-pane path.leaflet-interactive:focus-visible{stroke:#f1d698;stroke-width:2.5px}
-.leaflet-tile-pane{filter:brightness(.72) saturate(.84) contrast(1.22)}
+.leaflet-tile-pane{filter:brightness(.67) saturate(.78) contrast(1.24)}
 .map.dark-mode .leaflet-tile-pane{filter:brightness(.38) saturate(.35) contrast(1.18)}
 .uav-threat-marker{background:none;border:0}
 .uav-threat-icon{
@@ -111,9 +111,10 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid #dfc8
 .external-label-icon.hidden{display:none}
 .external-label-text{
   position:absolute;left:0;top:0;transform:translate(-50%,-50%);
-  color:#a2afb0;font:500 8px/1.15 'IBM Plex Mono',ui-monospace,monospace;
-  white-space:nowrap;opacity:.7;text-shadow:0 1px 2px #020608;
+  color:#b2c0bd;font:500 8px/1.15 'IBM Plex Mono',ui-monospace,monospace;
+  white-space:nowrap;opacity:.72;text-shadow:0 1px 2px #020608;
 }
+.country-label-text{color:#c3d0ca;font-size:10px;letter-spacing:.14em;text-transform:uppercase;opacity:.85}
 .region-card{
   position:absolute;z-index:1100;left:28px;bottom:96px;width:min(330px,calc(100vw - 56px));
   padding:17px 20px;background:#101b20f2;border:1px solid #65777b;

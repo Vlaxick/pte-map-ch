@@ -57,8 +57,8 @@ function provinceStyle(selected = false) {
 
 function provinceOutlineStyle() {
   return {
-    pane: 'provinceOutlines', color: mapStyle === 'dark' ? '#91a4a7' : '#b6c6bd',
-    weight: 1.45, opacity: 0.82, fill: false
+    pane: 'provinceOutlines', color: mapStyle === 'dark' ? '#829b9b' : '#aabcb1',
+    weight: 1.4, opacity: 0.8, fill: false
   };
 }
 
@@ -74,7 +74,7 @@ function setMapStyle(style) {
   button.title = dark ? 'Супутникова карта' : 'Темна карта';
   for (const [code, layer] of regionLayers) layer.setStyle(provinceStyle(code === selectedCode));
   provinceBorderLayer.setStyle(provinceOutlineStyle());
-  countryBorderLayer.setStyle({ color: dark ? '#a7bac0' : '#e8eee8' });
+  countryBorderLayer.setStyle({ color: dark ? '#b5c7c2' : '#d5e0d8' });
   try { localStorage.setItem('obriy-map-style', mapStyle); } catch {}
 }
 
@@ -237,7 +237,9 @@ function updateExternalLabels() {
   const occupied = [];
   const viewport = map.getContainer().getBoundingClientRect();
   // Keep labels legible when several small border regions meet on screen.
-  for (const { marker } of eligible.sort((a, b) => (a.country === 'RUS') - (b.country === 'RUS'))) {
+  for (const { marker } of eligible.sort((a, b) =>
+    (a.country === 'MDA' ? -1 : a.country === 'RUS' ? 1 : 0) -
+    (b.country === 'MDA' ? -1 : b.country === 'RUS' ? 1 : 0))) {
     const element = marker.getElement();
     const rect = element?.querySelector('.external-label-text')?.getBoundingClientRect();
     if (!rect || rect.right < viewport.left || rect.left > viewport.right ||
@@ -263,19 +265,20 @@ async function addExternalRegions() {
       if (regions) {
         L.geoJSON(regions, {
           pane: 'externalRegions', interactive: false,
-          style: { color: '#66767b', weight: 0.85, opacity: 0.52, fill: false }
+          style: { color: '#60777b', weight: 0.8, opacity: 0.5, fill: false }
         }).addTo(map);
       }
       L.geoJSON(outline, {
         pane: 'externalBorders', interactive: false,
-        style: { color: '#b4c4c3', weight: 1.75, opacity: 0.88, fill: false }
+        style: { color: '#91a6a3', weight: 1.45, opacity: 0.8, fill: false }
       }).addTo(map);
-      for (const feature of regions?.features || []) {
+      const labelFeatures = country === 'MDA' ? outline.features : regions?.features || [];
+      for (const feature of labelFeatures) {
         if (feature.properties.showLabel === false) continue;
         const [lon, lat] = feature.properties.center;
         const icon = L.divIcon({
           className: 'external-label-icon', iconSize: [0, 0],
-          html: '<span class="external-label-text">' + escapeHtml(feature.properties.label) + '</span>'
+          html: `<span class="external-label-text${country === 'MDA' ? ' country-label-text' : ''}">${escapeHtml(feature.properties.label)}</span>`
         });
         const marker = L.marker([lat, lon], {
           icon, pane: 'externalLabels', interactive: false, keyboard: false
@@ -293,9 +296,9 @@ async function addExternalRegions() {
 function alertStyle(level, oblast = false) {
   const red = level === 'red';
   return {
-    pane: 'alerts', color: red ? '#ad7471' : '#b69a59', weight: oblast ? 1.45 : 1.25,
-    opacity: 0.78, fillColor: red ? '#852f35' : '#86641f',
-    fillOpacity: oblast ? 0.68 : 0.73
+    pane: 'alerts', color: red ? '#c7837d' : '#c4a465', weight: oblast ? 1.45 : 1.25,
+    opacity: 0.8, fillColor: red ? '#913f45' : '#9a7127',
+    fillOpacity: oblast ? 0.62 : 0.67
   };
 }
 
@@ -452,7 +455,7 @@ async function init() {
     addUkraineImagery(country.features[0].geometry);
     countryBorderLayer = L.geoJSON(country, {
       pane: 'countryBorder', interactive: false,
-      style: { color: '#e8eee8', weight: 2, opacity: 0.9, fill: false }
+      style: { color: '#d5e0d8', weight: 2, opacity: 0.9, fill: false }
     }).addTo(map);
     L.geoJSON(provinces, {
       pane: 'provinces',

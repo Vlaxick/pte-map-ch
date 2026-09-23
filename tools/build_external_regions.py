@@ -31,8 +31,8 @@ RUSSIAN_OVERVIEW_LABELS = {
 
 
 def context_strength(iso, name):
-    """Keep full Poland and Romania, but only nearby regions in other neighbors."""
-    return 1.0 if iso in ("RUS", "POL", "ROU") or name in NEIGHBOR_NAMES[iso] else 0.0
+    """Keep complete nearby countries; limit Belarus to its border regions."""
+    return 1.0 if iso != "BLR" or name in NEIGHBOR_NAMES[iso] else 0.0
 UKRAINIAN_LABELS = {
     "Adygea": "Адигея", "Altai Krai": "Алтайський край",
     "Altai Republic": "Республіка Алтай", "Amur Oblast": "Амурська",
@@ -229,7 +229,7 @@ def main(countries=None, cache=CACHE):
                 "id": feature["properties"]["shapeID"], "country": iso,
                 "name": name, "label": UKRAINIAN_LABELS.get(name, name.title() if iso == "ROU" else name),
                 "center": label_center(geometry), "strength": strength,
-                "showLabel": iso not in ("POL", "ROU") or name in NEIGHBOR_NAMES[iso],
+                "showLabel": iso == "RUS" or name in NEIGHBOR_NAMES[iso],
                 "priorityLabel": iso == "RUS" and name in RUSSIAN_OVERVIEW_LABELS
             }})
         if iso != "RUS":
@@ -257,11 +257,12 @@ def main(countries=None, cache=CACHE):
             raise ValueError(f"Unexpected {iso} ADM0 count")
         feature = source["features"][0]
         geometry = simplify_geometry(feature["geometry"])
-        if iso not in ("RUS", "MDA", "POL", "ROU"):
+        if iso == "BLR":
             geometry = clipped_border(geometry, iso)
         country = {"type": "Feature", "geometry": geometry, "properties": {
             "id": feature["properties"]["shapeID"], "country": iso,
-            "name": feature["properties"]["shapeName"]
+            "name": feature["properties"]["shapeName"],
+            **({"label": "Молдова", "center": label_center(geometry)} if iso == "MDA" else {})
         }}
         output = adm0_output / f"{iso}.geojson"
         output.write_text(json.dumps({"type": "FeatureCollection", "features": [country]}, ensure_ascii=False, separators=(",", ":")))

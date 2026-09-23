@@ -420,6 +420,17 @@ function addLabels() {
 }
 
 async function init() {
+  if (location.protocol === 'file:') {
+    document.querySelector('.app').classList.add('startup-error');
+    $('topStatus').textContent = 'КАРТУ ПОТРІБНО ЗАПУСТИТИ';
+    $('sourceStatus').textContent = 'Карта не запущена';
+    $('map').innerHTML = `<div class="startup-message" role="alert">
+      <strong>Карта відкрита як файл</strong>
+      <p>Браузер не може завантажити межі з локальних файлів. У папці проєкту двічі натисніть <b>«Запустити Обрій.command»</b> — карта відкриється в новій вкладці.</p>
+      <small>Залиште вікно запуску відкритим, поки користуєтеся картою.</small>
+    </div>`;
+    return;
+  }
   if (!window.L) {
     $('map').textContent = 'Не вдалося завантажити карту.';
     return;
@@ -539,6 +550,7 @@ async function init() {
     setInterval(refreshLiveData, POLL_INTERVAL_MS);
   } catch (error) {
     $('topStatus').textContent = 'Не вдалося завантажити межі карти';
+    $('sourceStatus').textContent = 'Перевірте локальний сервер і файли геоданих';
     console.error(error);
   }
 }

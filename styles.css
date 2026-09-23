@@ -10,6 +10,18 @@ button{cursor:pointer}
 button:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid #dfc88b;outline-offset:3px}
 .app{position:relative;width:100%;height:100dvh;overflow:hidden;background:#10191c}
 .map{position:absolute;inset:0}
+.startup-message{
+  position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  width:min(480px,calc(100% - 32px));padding:25px 28px;
+  background:#18262a;border:1px solid #60777b;border-left:3px solid #c4a465;
+  color:#e2eae6;box-shadow:0 18px 50px #050a0c66;
+}
+.startup-message strong{display:block;font-size:18px;letter-spacing:-.02em}
+.startup-message p{font-size:13px;line-height:1.7;color:#c4d0cd}
+.startup-message b{color:#efcf8e}
+.startup-message small{font:500 10px/1.5 'IBM Plex Mono',monospace;color:#9eafac}
+.app.startup-error .top-actions,.app.startup-error .map-style-toggle,
+.app.startup-error .zoom-controls{display:none}
 .leaflet-container{background:#10191c;font:inherit}
 .leaflet-pane path.leaflet-interactive:focus{outline:none}
 .leaflet-pane path.leaflet-interactive:focus-visible{stroke:#f1d698;stroke-width:2.5px}

@@ -27,21 +27,35 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid #dfc8
 .leaflet-pane path.leaflet-interactive:focus-visible{stroke:#f1d698;stroke-width:2.5px}
 .leaflet-tile-pane{filter:brightness(.67) saturate(.78) contrast(1.24)}
 .map.dark-mode .leaflet-tile-pane{filter:brightness(.38) saturate(.35) contrast(1.18)}
-.uav-threat-marker{background:none;border:0}
-.uav-threat-icon{
-  position:relative;display:block;width:32px;height:32px;
+.threat-marker{background:none;border:0}
+.threat-icon{
+  position:relative;display:block;width:26px;height:26px;
   transform:rotate(var(--heading,0deg));transform-origin:50% 50%;
 }
-.uav-threat-icon.has-heading::before{
-  content:'';position:absolute;left:50%;top:-4px;width:2px;height:10px;
+.threat-icon.has-heading::before{
+  content:'';position:absolute;left:50%;top:-3px;width:2px;height:8px;
   transform:translateX(-50%);border-radius:2px;background:#f5e8c7;
   box-shadow:0 0 3px #080b0ce0;
 }
-.uav-threat-icon.advisory{opacity:.66}
-.uav-threat-icon img{
-  position:absolute;inset:0;width:32px;height:32px;object-fit:contain;
-  filter:drop-shadow(0 1px 2px #080b0ce0);
+.threat-icon.advisory{opacity:.6}
+.threat-art,.threat-payload{
+  position:absolute;top:0;left:2px;display:block;width:22px;height:26px;
+  background:#f5e4c5;
+  /* XOR the source image's luminance with a solid mask: white becomes
+     transparent and the darker aircraft becomes the visible silhouette. */
+  -webkit-mask-image:linear-gradient(#fff,#fff),var(--art);
+  -webkit-mask-mode:alpha,luminance;
+  -webkit-mask-composite:xor;
+  -webkit-mask-size:100% 100%,100% 100%;
+  -webkit-mask-repeat:no-repeat;
+  mask-image:linear-gradient(#fff,#fff),var(--art);
+  mask-mode:alpha,luminance;
+  mask-composite:exclude;
+  mask-size:100% 100%,100% 100%;
+  mask-repeat:no-repeat;
 }
+.threat-icon-orion .threat-art{width:18px;left:4px}
+.threat-payload{width:9px;height:11px;top:auto;left:auto;right:-2px;bottom:-2px;background:#e9aa82}
 .leaflet-control-attribution{
   max-width:min(75vw,760px);
   padding:4px 8px!important;
@@ -102,6 +116,7 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid #dfc8
 .help-symbol{display:grid;place-items:center;width:18px;height:18px;border:1px solid currentColor;border-radius:50%;font-size:11px}
 .help-panel{
   position:absolute;z-index:1150;right:18px;top:72px;width:min(340px,calc(100vw - 36px));
+  max-height:calc(100dvh - 90px);overflow:auto;
   padding:20px;background:#142126f5;border:1px solid #607176;border-radius:24px;
   box-shadow:0 20px 58px #03080ac9;backdrop-filter:blur(18px);font-size:12px;line-height:1.55;
 }
@@ -114,6 +129,10 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid #dfc8
 .legend-row{display:flex;align-items:center;gap:10px;margin:9px 0;color:#d9e3df}
 .legend-row i{flex:none;width:15px;height:15px;border-radius:5px;border:1px solid #ffffff42}
 .legend-yellow{background:#9a7127}.legend-red{background:#913f45}.legend-flag{background:linear-gradient(#347bc5 50%,#d4ad3c 50%)}
+.threat-legend-title{display:block;margin:17px 0 6px;font:600 11px 'IBM Plex Mono',monospace;color:#cfdcd7}
+.threat-legend{display:grid;grid-template-columns:1fr 1fr;gap:7px 8px}
+.threat-legend>span{display:flex;align-items:center;gap:7px;min-width:0;font-size:10px;color:#cbd8d4}
+.threat-legend .threat-icon{flex:none}
 .zoom-controls{
   position:absolute;z-index:1100;right:18px;top:50%;transform:translateY(-50%);
   display:grid;padding:5px;background:#111b20e8;border:1px solid #607176a8;border-radius:28px;

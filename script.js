@@ -6,6 +6,16 @@ const EXTERNAL_COUNTRIES = ['RUS', 'BLR', 'POL', 'SVK', 'HUN', 'ROU', 'MDA'];
 const EXTERNAL_CREDIT = '<a href="https://www.geoboundaries.org/" target="_blank" rel="noopener noreferrer">External regions: geoBoundaries gbOpen</a>';
 const NEPTUN_API = 'https://neptun.in.ua/api/v1';
 const POLL_INTERVAL_MS = 15000;
+const THREAT_ICON_SIZE = 26; // Roughly 20% smaller than the former 32px markers.
+const THREAT_ICONS = {
+  shahed: './assets/threats/shahed.png',
+  ballistic: './assets/threats/ballistic.png',
+  orion: './assets/threats/orion.png',
+  su35: './assets/threats/su35.png',
+  kab: './assets/threats/kab.png',
+  fpv: './assets/threats/fpv.png',
+  cruise: './assets/threats/cruise.png'
+};
 const GEONAMES_CREDIT = '<a href="https://www.geonames.org/export/" target="_blank" rel="noopener noreferrer">Settlements: GeoNames CC BY</a>';
 const SETTLEMENT_REGIONS = {
   '01':'Черкаська', '02':'Чернігівська', '03':'Чернівецька', '04':'Дніпропетровська',
@@ -413,6 +423,29 @@ function renderAlerts(data) {
   renderSelectedCard();
 }
 
+function threatIconKind(threat) {
+  const type = String(threat.type || '').toLocaleLowerCase('uk');
+  const title = String(threat.title || '').toLocaleLowerCase('uk');
+  const su35 = /(?:су|su)[-\s‑–]?35/.test(title);
+  const kab = type === 'kab' || /каб|\bkab\b|керован[а-яіїєґ]* авіабомб/.test(title);
+  if (su35 && kab) return 'su35-kab';
+  if (su35) return 'su35';
+  if (type === 'fpv' || /\bfpv\b|фпв/.test(title)) return 'fpv';
+  if (type === 'recon' || /оріон|orion/.test(title)) return 'orion';
+  if (type === 'ballistic' || /балістич|баллистич|ballistic/.test(title)) return 'ballistic';
+  if (kab) return 'kab';
+  if (type === 'missile' || /крилат[а-яіїєґ]* ракет|cruise missile/.test(title)) return 'cruise';
+  if (type === 'uav' || /шахед|shahed|герань|geran/.test(title)) return 'shahed';
+  return null;
+}
+
+function threatIconHtml(kind, heading, advisory) {
+  const mainKind = kind === 'su35-kab' ? 'su35' : kind;
+  const payload = kind === 'su35-kab'
+    ? `<span class="threat-payload" style="--art:url('${THREAT_ICONS.kab}')"></span>` : '';
+  return `<span class="threat-icon threat-icon-${mainKind}${advisory ? ' advisory' : ''}${heading == null ? '' : ' has-heading'}" style="--heading:${heading == null ? 0 : heading.toFixed(1)}deg"><span class="threat-art" style="--art:url('${THREAT_ICONS[mainKind]}')"></span>${payload}</span>`;
+}
+
 function renderThreats(data) {
   threatLayer.clearLayers();
   threatState = data && Array.isArray(data.threats) && isFresh(data.serverTime, 120000)
@@ -431,16 +464,18 @@ function renderThreats(data) {
       ? ((rawHeading % 360) + 360) % 360 : null;
     const color = advisory ? '#9ab5c0' : threat.type === 'ballistic' || threat.type === 'missile'
       ? '#fa8180' : '#f1c980';
-    const marker = threat.type === 'uav'
+    const iconKind = threatIconKind(threat);
+    const marker = iconKind
       ? L.marker([Number(threat.lat), Number(threat.lon)], {
-        pane: 'threats', title: `${threat.title || 'БпЛА'}${heading == null ? '' : ` · орієнтовний курс ${Math.round(heading)}°`}`,
+        pane: 'threats', title: `${threat.title || 'Загроза'}${heading == null ? '' : ` · орієнтовний курс ${Math.round(heading)}°`}`,
         icon: L.divIcon({
-          className: 'uav-threat-marker', iconSize: [32, 32], iconAnchor: [16, 16],
-          html: `<span class="uav-threat-icon${advisory ? ' advisory' : ''}${heading == null ? '' : ' has-heading'}" style="--heading:${heading == null ? 0 : heading.toFixed(1)}deg"><img src="./assets/shahed.png?v=2" alt="" /></span>`
+          className: 'threat-marker', iconSize: [THREAT_ICON_SIZE, THREAT_ICON_SIZE],
+          iconAnchor: [THREAT_ICON_SIZE / 2, THREAT_ICON_SIZE / 2],
+          html: threatIconHtml(iconKind, heading, advisory)
         })
       }).addTo(threatLayer)
       : L.circleMarker([Number(threat.lat), Number(threat.lon)], {
-        pane: 'threats', radius: advisory ? 5 : 7, color, weight: 2,
+        pane: 'threats', radius: advisory ? 4 : 5.5, color, weight: 2,
         fillColor: color, fillOpacity: advisory ? 0.36 : 0.65,
         dashArray: approximate ? '3 3' : undefined
       }).addTo(threatLayer);

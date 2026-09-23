@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="./vendor/leaflet.css" />
-  <link rel="stylesheet" href="./styles.css?v=27" />
+  <link rel="stylesheet" href="./styles.css?v=34" />
 </head>
 <body>
   <main class="app">
@@ -36,13 +36,23 @@
       <div class="legend-row"><i class="legend-yellow"></i><span>Жовтий рівень тривоги</span></div>
       <div class="legend-row"><i class="legend-red"></i><span>Червоний рівень тривоги</span></div>
       <div class="legend-row"><i class="legend-flag"></i><span>Крим і Луганщина: кожен регіон синій зверху, жовтий знизу; червоний контур означає червоний рівень</span></div>
-      <p class="help-muted">Позначки БпЛА показують повідомлене або приблизне місце. Орієнтовний курс відображається лише за наявності свіжих даних.</p>
+      <strong class="threat-legend-title">Позначки загроз</strong>
+      <div class="threat-legend">
+        <span><span class="threat-icon"><span class="threat-art" style="--art:url('./assets/threats/shahed.png')"></span></span>Ударний БпЛА</span>
+        <span><span class="threat-icon"><span class="threat-art" style="--art:url('./assets/threats/ballistic.png')"></span></span>Балістика</span>
+        <span><span class="threat-icon"><span class="threat-art" style="--art:url('./assets/threats/orion.png')"></span></span>Розвід БпЛА</span>
+        <span><span class="threat-icon"><span class="threat-art" style="--art:url('./assets/threats/fpv.png')"></span></span>FPV-дрон</span>
+        <span><span class="threat-icon"><span class="threat-art" style="--art:url('./assets/threats/cruise.png')"></span></span>Ракета</span>
+        <span><span class="threat-icon"><span class="threat-art" style="--art:url('./assets/threats/kab.png')"></span></span>КАБ</span>
+        <span><span class="threat-icon"><span class="threat-art" style="--art:url('./assets/threats/su35.png')"></span><span class="threat-payload" style="--art:url('./assets/threats/kab.png')"></span></span>Су-35 + КАБ</span>
+      </div>
+      <p class="help-muted">Модель літака показується лише коли її названо в повідомленні. Місце може бути приблизним; курс показано лише за свіжими даними.</p>
     </aside>
     <div class="zoom-controls"><button id="zoomIn" aria-label="Наблизити">+</button><button id="zoomOut" aria-label="Віддалити">−</button></div>
     <section id="regionCard" class="region-card" aria-live="polite" hidden></section>
     <div class="source-note"><a href="https://neptun.in.ua/" target="_blank" rel="noopener noreferrer">Дані про тривоги й загрози: NEPTUN ↗</a><span id="sourceStatus">Підключення до даних…</span><small>Інформаційна карта. Перевіряйте офіційні сигнали тривоги.</small></div>
   </main>
   <script src="./vendor/leaflet.js"></script>
-  <script src="./script.js?v=33"></script>
+  <script src="./script.js?v=36"></script>
 </body>
 </html>

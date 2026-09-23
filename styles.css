@@ -1,0 +1,136 @@
+:root{
+  font-family:Manrope,system-ui,sans-serif;
+  color:#e6eceb;
+  background:#0b1114;
+}
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden}
+button,input{font:inherit}
+button{cursor:pointer}
+button:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid #dfc88b;outline-offset:3px}
+.app{position:relative;width:100%;height:100dvh;overflow:hidden;background:#0b1114}
+.map{position:absolute;inset:0}
+.leaflet-container{background:#0b1114;font:inherit}
+.leaflet-pane path.leaflet-interactive:focus{outline:none}
+.leaflet-pane path.leaflet-interactive:focus-visible{stroke:#f1d698;stroke-width:2.5px}
+.leaflet-tile-pane{filter:brightness(.7) saturate(.72) contrast(1.08)}
+.map.dark-mode .leaflet-tile-pane{filter:brightness(.35) saturate(.28) contrast(1.17)}
+.leaflet-control-attribution{
+  max-width:min(75vw,760px);
+  padding:4px 8px!important;
+  background:#0b1114d9!important;
+  color:#9daeb1!important;
+  font:10px/1.4 'IBM Plex Mono',monospace!important;
+  text-align:right;
+}
+.leaflet-control-attribution a{color:#c6d2d2!important}
+.topbar{
+  position:absolute;z-index:1100;top:0;left:0;right:0;height:68px;
+  display:flex;align-items:center;justify-content:space-between;gap:20px;
+  padding:0 28px;background:#0b1114e8;border-bottom:1px solid #334045;
+  backdrop-filter:blur(12px);
+}
+.brand{display:flex;align-items:center;gap:10px;white-space:nowrap}
+.brand-mark{
+  width:31px;height:31px;display:grid;place-items:center;
+  border:1px solid #a99d7f;border-radius:50%;
+  color:#d9c797;font-size:20px;line-height:1;
+}
+.brand strong{display:block;font-size:16px;font-weight:800;letter-spacing:.18em;line-height:1}
+.brand small{
+  display:block;margin-top:6px;color:#9baeb3;
+  font:500 9px 'IBM Plex Mono',monospace;letter-spacing:.16em;
+}
+.top-status{
+  color:#b1c1c3;font:500 10px 'IBM Plex Mono',monospace;
+  letter-spacing:.1em;white-space:nowrap;
+}
+.status-dot{
+  display:inline-block;width:6px;height:6px;margin-right:7px;
+  border-radius:50%;background:#d9c797;vertical-align:1px;
+}
+.top-status.connected .status-dot{background:#d77f69}
+.top-actions{display:flex;align-items:center;gap:8px}
+.search{
+  position:relative;display:flex;align-items:center;width:190px;height:39px;
+  background:#1b292edc;border:1px solid #54646a;border-radius:4px;
+}
+.search span:first-child{position:absolute;left:10px;top:2px;color:#d9c797;font-size:21px}
+.search input{width:100%;height:100%;padding:0 10px 0 34px;background:none;border:0;outline:0;color:#f1f5f4;font-size:12px}
+.search input::placeholder{color:#b8c5c6}
+#resetView{
+  width:39px;height:39px;border:1px solid #54646a;border-radius:4px;
+  background:#1b292edc;color:#e6eceb;font-size:24px;line-height:1;
+}
+#resetView:hover,.zoom-controls button:hover{background:#304349}
+.map-style-toggle{
+  position:absolute;z-index:1100;right:25px;top:84px;
+  display:grid;place-items:center;width:46px;height:46px;
+  border:1px solid #54646a;border-radius:4px;
+  background:#111b20e8;color:#e6eceb;
+}
+.map-style-toggle:hover{background:#304349}
+.map-style-toggle.active{background:#254044;color:#b6e3d9;border-color:#72928f}
+.zoom-controls{
+  position:absolute;z-index:1100;right:25px;top:50%;transform:translateY(-50%);
+  display:grid;padding:4px;background:#111b20e8;border:1px solid #54646a;border-radius:4px;
+}
+.zoom-controls button{width:38px;height:38px;border:0;background:transparent;color:#e6eceb;font-size:22px}
+.zoom-controls button+button{border-top:1px solid #47585e}
+.oblast-label-icon{background:none;border:0;pointer-events:none;transition:opacity .22s ease}
+.oblast-label-text{
+  position:absolute;left:0;top:0;transform:translate(-50%,-50%);
+  color:#dce7e6;font:500 8px/1.2 'IBM Plex Mono',ui-monospace,monospace;
+  letter-spacing:.005em;white-space:nowrap;
+  text-shadow:0 1px 2px #05090ad9;
+  transition:opacity .22s ease,font-size .22s ease;
+}
+.oblast-label-icon.selected .oblast-label-text{color:#f3dca4}
+.oblast-label-icon.city .oblast-label-text{transform:translate(10px,-50%);font-weight:600}
+.oblast-label-icon.city .oblast-label-text::before{
+  content:'';position:absolute;left:-10px;top:50%;width:6px;height:6px;
+  transform:translate(-50%,-50%);border:1px solid #e7d19d;border-radius:50%;background:#0b1114;
+}
+.oblast-label-icon.hidden{display:none}
+.external-label-icon{background:none;border:0;pointer-events:none}
+.external-label-icon.hidden{display:none}
+.external-label-text{
+  position:absolute;left:0;top:0;transform:translate(-50%,-50%);
+  color:#a2afb0;font:500 8px/1.15 'IBM Plex Mono',ui-monospace,monospace;
+  white-space:nowrap;opacity:.48;text-shadow:0 1px 2px #020608;
+}
+.region-card{
+  position:absolute;z-index:1100;left:28px;bottom:28px;width:min(330px,calc(100vw - 56px));
+  padding:17px 20px;background:#101b20f2;border:1px solid #65777b;
+  border-left:3px solid #d9c797;border-radius:4px;
+}
+.region-card[hidden]{display:none}
+.card-head{
+  display:flex;align-items:center;justify-content:space-between;
+  color:#e5d49f;font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.08em;
+}
+.card-head button{border:0;background:none;color:#e6eceb;font-size:21px;line-height:1}
+.region-card h2{margin:13px 0 7px;font-size:18px;letter-spacing:-.03em}
+.region-card p{margin:0;color:#b7c8ca;font-size:12px;line-height:1.6}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+@media(max-width:900px){
+  .top-status{display:none}
+  .topbar{padding:0 18px}
+}
+@media(max-width:600px){
+  .topbar{height:58px;padding:0 12px;gap:8px}
+  .brand{gap:7px}
+  .brand-mark{width:25px;height:25px;font-size:16px}
+  .brand strong{font-size:13px}
+  .brand small{font-size:7px}
+  .search{width:132px;height:36px}
+  .search input,.search input::placeholder{font-size:10px}
+  #resetView{width:36px;height:36px}
+  .zoom-controls{right:12px;top:auto;bottom:68px;transform:none}
+  .map-style-toggle{right:12px;top:70px;width:40px;height:40px}
+  .zoom-controls button{width:40px;height:40px}
+  .oblast-label-text{font-size:8px}
+  .region-card{left:12px;bottom:55px;width:min(320px,calc(100vw - 70px))}
+  .leaflet-control-attribution{max-width:95vw;font-size:8px!important}
+}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{transition-duration:.01ms!important}}

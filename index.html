@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0c1114" />
+  <title>Обрій — карта України</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./vendor/leaflet.css" />
+  <link rel="stylesheet" href="./styles.css?v=15" />
+</head>
+<body>
+  <main class="app">
+    <div id="map" class="map" aria-label="Супутникова карта України"></div>
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">✦</span><div><strong>ОБРІЙ</strong><small>КАРТА УКРАЇНИ</small></div></div>
+      <div id="topStatus" class="top-status"><span class="status-dot"></span> ДАНІ ПРО ТРИВОГИ НЕ ПІДКЛЮЧЕНІ</div>
+      <div class="top-actions"><label class="search"><span aria-hidden="true">⌕</span><span class="sr-only">Знайти регіон</span><input id="regionSearch" type="search" placeholder="Знайти регіон" autocomplete="off" /></label><button id="resetView" aria-label="Показати всю Україну" title="Показати всю Україну">⌖</button></div>
+    </header>
+    <button id="mapStyleToggle" class="map-style-toggle" type="button" aria-label="Увімкнути темну карту" aria-pressed="false" title="Темна карта">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true">
+        <path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 12 9 5 9-5"/><path d="m3 16 9 5 9-5"/>
+      </svg>
+    </button>
+    <div class="zoom-controls"><button id="zoomIn" aria-label="Наблизити">+</button><button id="zoomOut" aria-label="Віддалити">−</button></div>
+    <section id="regionCard" class="region-card" aria-live="polite" hidden></section>
+  </main>
+  <script src="./vendor/leaflet.js"></script>
+  <script src="./script.js?v=18"></script>
+</body>
+</html>

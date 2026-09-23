@@ -16,7 +16,6 @@ let districtsByCode = new Map();
 let alertLayer;
 let countryBorderLayer;
 let externalRegionLabels = [];
-let externalCountryLabels = [];
 let mapStyle = 'satellite';
 let alertState = 'disconnected';
 let activeDistrictCodes = [];
@@ -192,9 +191,29 @@ function addUkraineImagery(geometry) {
 
 function updateExternalLabels() {
   const zoom = map.getZoom();
-  const showRegions = zoom >= (window.innerWidth < 600 ? 7.5 : 7.1);
-  for (const marker of externalRegionLabels) marker.getElement()?.classList.toggle('hidden', !showRegions);
-  for (const marker of externalCountryLabels) marker.getElement()?.classList.toggle('hidden', showRegions || zoom < 4.65);
+  const compact = window.innerWidth < 600;
+  const eligible = [];
+  for (const item of externalRegionLabels) {
+    const { marker, country, priority } = item;
+    const show = country === 'RUS'
+      ? zoom >= (compact ? 7.25 : 6.75) || (priority && zoom >= 4.65)
+      : zoom >= 4.65;
+    marker.getElement()?.classList.toggle('hidden', !show);
+    if (show) eligible.push(item);
+  }
+  const occupied = [];
+  const viewport = map.getContainer().getBoundingClientRect();
+  // Keep labels legible when several small border regions meet on screen.
+  for (const { marker } of eligible.sort((a, b) => (a.country === 'RUS') - (b.country === 'RUS'))) {
+    const element = marker.getElement();
+    const rect = element?.querySelector('.external-label-text')?.getBoundingClientRect();
+    if (!rect || rect.right < viewport.left || rect.left > viewport.right ||
+        rect.bottom < viewport.top || rect.top > viewport.bottom) continue;
+    const overlaps = occupied.some(other => rect.left < other.right + 5 &&
+      rect.right > other.left - 5 && rect.top < other.bottom + 3 && rect.bottom > other.top - 3);
+    if (overlaps) element.classList.add('hidden');
+    else occupied.push(rect);
+  }
 }
 
 async function addExternalRegions() {
@@ -218,25 +237,16 @@ async function addExternalRegions() {
         pane: 'externalBorders', interactive: false,
         style: { color: '#b4c4c3', weight: 1.75, opacity: 0.88, fill: false }
       }).addTo(map);
-      const countryFeature = outline.features[0];
-      const [countryLon, countryLat] = countryFeature.properties.center;
-      const countryIcon = L.divIcon({
-        className: 'external-label-icon', iconSize: [0, 0],
-        html: '<span class="external-country-label">' + escapeHtml(countryFeature.properties.label) + '</span>'
-      });
-      externalCountryLabels.push(L.marker([countryLat, countryLon], {
-        icon: countryIcon, pane: 'externalLabels', interactive: false, keyboard: false
-      }).addTo(map));
       for (const feature of regions?.features || []) {
-        if (!feature.properties.showLabel) continue;
         const [lon, lat] = feature.properties.center;
         const icon = L.divIcon({
           className: 'external-label-icon', iconSize: [0, 0],
           html: '<span class="external-label-text">' + escapeHtml(feature.properties.label) + '</span>'
         });
-        externalRegionLabels.push(L.marker([lat, lon], {
+        const marker = L.marker([lat, lon], {
           icon, pane: 'externalLabels', interactive: false, keyboard: false
-        }).addTo(map));
+        }).addTo(map);
+        externalRegionLabels.push({ marker, country, priority: feature.properties.priorityLabel });
       }
     }
     map.attributionControl.addAttribution(EXTERNAL_CREDIT);
@@ -374,7 +384,7 @@ async function init() {
     });
     addLabels();
     addExternalRegions();
-    map.on('zoomend resize', updateExternalLabels);
+    map.on('zoomend moveend resize', updateExternalLabels);
     $('mapStyleToggle').onclick = () => setMapStyle(mapStyle === 'dark' ? 'satellite' : 'dark');
     try {
       if (localStorage.getItem('obriy-map-style') === 'dark') setMapStyle('dark');

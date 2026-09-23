@@ -1,6 +1,6 @@
 # External ADM1 boundaries
 
-These GeoJSON files are simplified derivatives of [geoBoundaries gbOpen](https://www.geoboundaries.org/) at repository revision `9469f09`. Geometry was simplified to 0.006 degrees. Russia includes all 83 ADM1 features, with labels limited to 16 western and southern regions. Poland, Hungary, Romania, Belarus and Slovakia show only their main Ukrainian border regions. Moldova has only its ADM0 outline in `../external-admin0`. The original region names and identifiers are preserved in feature properties. Additional Ukrainian labels are cartographic annotations.
+These GeoJSON files are simplified derivatives of [geoBoundaries gbOpen](https://www.geoboundaries.org/) at repository revision `9469f09`. Geometry was simplified to 0.006 degrees. Russia includes all 83 ADM1 features with Ukrainian labels; eight border regions are visible at overview scale and all labels appear when zoomed in. Poland, Hungary, Romania, Belarus and Slovakia show and label only their main Ukrainian border regions. Moldova has only its ADM0 outline in `../external-admin0`. The original region names and identifiers are preserved in feature properties. Additional Ukrainian labels are cartographic annotations.
 
 | File | Source | Original dataset year | Licence |
 | --- | --- | ---: | --- |

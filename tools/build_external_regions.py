@@ -1,18 +1,19 @@
 """Build nearby ADM1 regions and country outlines from pinned geoBoundaries data.
 
-Run `python3 tools/build_external_regions.py`. Source files are downloaded only
-when missing from the optional cache directory passed as the first argument.
+Run `python3 tools/build_external_regions.py` or pass `--only POL ROU` to
+regenerate selected countries. Source files are downloaded only when missing
+from the optional cache directory passed as the first argument.
 The generated per-country files keep their source licences separate.
 """
 
+import argparse
 import json
-import sys
 import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "data" / "external-admin1"
-CACHE = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / ".boundary-cache"
+CACHE = ROOT / ".boundary-cache"
 REVISION = "9469f09"
 COUNTRIES = ("RUS", "BLR", "POL", "SVK", "HUN", "ROU")
 NEIGHBOR_NAMES = {
@@ -30,8 +31,8 @@ RUSSIAN_OVERVIEW_LABELS = {
 
 
 def context_strength(iso, name):
-    """Keep Russian regions and only the primary border regions elsewhere."""
-    return 1.0 if iso == "RUS" or name in NEIGHBOR_NAMES[iso] else 0.0
+    """Keep full Poland and Romania, but only nearby regions in other neighbors."""
+    return 1.0 if iso in ("RUS", "POL", "ROU") or name in NEIGHBOR_NAMES[iso] else 0.0
 UKRAINIAN_LABELS = {
     "Adygea": "Адигея", "Altai Krai": "Алтайський край",
     "Altai Republic": "Республіка Алтай", "Amur Oblast": "Амурська",
@@ -206,11 +207,12 @@ def label_center(geometry):
     return [round(ring[0][0], 5), round(ring[0][1], 5)]
 
 
-def main():
-    CACHE.mkdir(parents=True, exist_ok=True)
+def main(countries=None, cache=CACHE):
+    selected = COUNTRIES if countries is None else tuple(countries)
+    cache.mkdir(parents=True, exist_ok=True)
     OUTPUT.mkdir(parents=True, exist_ok=True)
-    for iso in COUNTRIES:
-        path = CACHE / f"{iso}.geojson"
+    for iso in selected:
+        path = cache / f"{iso}.geojson"
         if not path.exists():
             url = (f"https://github.com/wmgeolab/geoBoundaries/raw/{REVISION}/"
                    f"releaseData/gbOpen/{iso}/ADM1/geoBoundaries-{iso}-ADM1_simplified.geojson")
@@ -227,6 +229,7 @@ def main():
                 "id": feature["properties"]["shapeID"], "country": iso,
                 "name": name, "label": UKRAINIAN_LABELS.get(name, name.title() if iso == "ROU" else name),
                 "center": label_center(geometry), "strength": strength,
+                "showLabel": iso not in ("POL", "ROU") or name in NEIGHBOR_NAMES[iso],
                 "priorityLabel": iso == "RUS" and name in RUSSIAN_OVERVIEW_LABELS
             }})
         if iso != "RUS":
@@ -243,8 +246,8 @@ def main():
 
     adm0_output = ROOT / "data" / "external-admin0"
     adm0_output.mkdir(parents=True, exist_ok=True)
-    for iso in COUNTRY_OUTLINES:
-        path = CACHE / f"{iso}-adm0.geojson"
+    for iso in COUNTRY_OUTLINES if countries is None else selected:
+        path = cache / f"{iso}-adm0.geojson"
         if not path.exists():
             url = (f"https://github.com/wmgeolab/geoBoundaries/raw/{REVISION}/"
                    f"releaseData/gbOpen/{iso}/ADM0/geoBoundaries-{iso}-ADM0_simplified.geojson")
@@ -254,7 +257,7 @@ def main():
             raise ValueError(f"Unexpected {iso} ADM0 count")
         feature = source["features"][0]
         geometry = simplify_geometry(feature["geometry"])
-        if iso not in ("RUS", "MDA"):
+        if iso not in ("RUS", "MDA", "POL", "ROU"):
             geometry = clipped_border(geometry, iso)
         country = {"type": "Feature", "geometry": geometry, "properties": {
             "id": feature["properties"]["shapeID"], "country": iso,
@@ -266,4 +269,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("cache", nargs="?", type=Path, default=CACHE)
+    parser.add_argument("--only", nargs="+", choices=COUNTRIES)
+    args = parser.parse_args()
+    main(args.only, args.cache)

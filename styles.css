@@ -9,13 +9,12 @@ button,input{font:inherit}
 button{cursor:pointer}
 button:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid #dfc88b;outline-offset:3px}
 .app{position:relative;width:100%;height:100dvh;overflow:hidden;background:#0b1114}
-.map-defs{position:absolute;pointer-events:none}
 .map{position:absolute;inset:0}
 .leaflet-container{background:#0b1114;font:inherit}
 .leaflet-pane path.leaflet-interactive:focus{outline:none}
 .leaflet-pane path.leaflet-interactive:focus-visible{stroke:#f1d698;stroke-width:2.5px}
-.leaflet-tile-pane{filter:brightness(.57) saturate(.74) contrast(1.2)}
-.map.dark-mode .leaflet-tile-pane{filter:brightness(.3) saturate(.3) contrast(1.23)}
+.leaflet-tile-pane{filter:brightness(.72) saturate(.84) contrast(1.22)}
+.map.dark-mode .leaflet-tile-pane{filter:brightness(.38) saturate(.35) contrast(1.18)}
 .uav-threat-marker{background:none;border:0}
 .uav-threat-icon{
   position:relative;display:block;width:38px;height:38px;border-radius:50%;

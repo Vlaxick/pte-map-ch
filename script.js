@@ -46,9 +46,9 @@ function provinceStyle(selected = false) {
   }
   return {
     pane: 'provinces',
-    color: selected ? '#f1d698' : '#d1ddda',
-    weight: selected ? 2.3 : 1.25,
-    opacity: selected ? 1 : 0.78,
+    color: selected ? '#dac995' : '#b6c2b9',
+    weight: selected ? 2 : 1,
+    opacity: selected ? 0.95 : 0.66,
     fillColor: selected ? '#d6b778' : '#c5d9cc',
     fillOpacity: selected ? 0.2 : 0.035
   };
@@ -262,6 +262,7 @@ async function addExternalRegions() {
         style: { color: '#b4c4c3', weight: 1.75, opacity: 0.88, fill: false }
       }).addTo(map);
       for (const feature of regions?.features || []) {
+        if (feature.properties.showLabel === false) continue;
         const [lon, lat] = feature.properties.center;
         const icon = L.divIcon({
           className: 'external-label-icon', iconSize: [0, 0],
@@ -283,9 +284,9 @@ async function addExternalRegions() {
 function alertStyle(level, oblast = false) {
   const red = level === 'red';
   return {
-    pane: 'alerts', color: red ? '#ff938d' : '#f5cf69', weight: oblast ? 2 : 2.45,
-    opacity: 0.96, fillColor: `url(#alert-${red ? 'red' : 'yellow'}-gradient)`,
-    fillOpacity: oblast ? 0.68 : 0.83
+    pane: 'alerts', color: red ? '#ad7471' : '#b69a59', weight: oblast ? 1.45 : 1.25,
+    opacity: 0.78, fillColor: red ? '#852f35' : '#86641f',
+    fillOpacity: oblast ? 0.68 : 0.73
   };
 }
 

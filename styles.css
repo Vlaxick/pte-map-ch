@@ -121,21 +121,18 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid #dfc8
 }
 .zoom-controls button{width:38px;height:38px;border:0;border-radius:50%;background:transparent;color:#e6eceb;font-size:22px}
 .zoom-controls button+button{margin-top:3px}
-.oblast-label-icon{background:none;border:0;pointer-events:none;transition:opacity .22s ease}
-.oblast-label-text{
-  position:absolute;left:0;top:0;transform:translate(-50%,-50%);
-  color:#dce7e6;font:500 8px/1.2 'IBM Plex Mono',ui-monospace,monospace;
-  letter-spacing:.005em;white-space:nowrap;
-  text-shadow:0 1px 2px #05090ad9;
-  transition:opacity .22s ease,font-size .22s ease;
+.capital-label-icon{background:none;border:0;pointer-events:none}
+.capital-label-icon.hidden{display:none}
+.capital-label-text{
+  position:absolute;left:0;top:0;transform:translate(7px,-50%);
+  color:#e6edeb;font:600 9px/1.2 'IBM Plex Mono',ui-monospace,monospace;
+  white-space:nowrap;text-shadow:0 1px 3px #05090afa,0 0 6px #05090aec;
 }
-.oblast-label-icon.selected .oblast-label-text{color:#f3dca4}
-.oblast-label-icon.city .oblast-label-text{transform:translate(10px,-50%);font-weight:600}
-.oblast-label-icon.city .oblast-label-text::before{
-  content:'';position:absolute;left:-10px;top:50%;width:6px;height:6px;
-  transform:translate(-50%,-50%);border:1px solid #e7d19d;border-radius:50%;background:#0b1114;
+.capital-label-text::before{
+  content:'';position:absolute;left:-7px;top:50%;width:4px;height:4px;
+  transform:translate(-50%,-50%);border-radius:50%;background:#dfc88b;
 }
-.oblast-label-icon.hidden{display:none}
+.capital-label-icon.selected .capital-label-text{color:#f2d79a}
 .external-label-icon{background:none;border:0;pointer-events:none}
 .external-label-icon.hidden{display:none}
 .external-label-text{
@@ -203,7 +200,7 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid #dfc8
   .zoom-controls{right:10px;top:auto;bottom:136px;transform:none}
   .help-panel{top:58px;right:10px}
   .zoom-controls button{width:40px;height:40px}
-  .oblast-label-text{font-size:8px}
+  .capital-label-text{font-size:8px}
   .region-card{left:10px;bottom:158px;width:min(320px,calc(100vw - 65px))}
   .source-note{left:10px;bottom:43px;max-width:calc(100vw - 75px);font-size:8px}
   .leaflet-control-attribution{max-width:95vw;font-size:8px!important}

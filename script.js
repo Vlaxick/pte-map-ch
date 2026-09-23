@@ -16,6 +16,34 @@ const SETTLEMENT_REGIONS = {
   '21':'Сумська', '22':'Тернопільська', '23':'Вінницька', '24':'Волинська',
   '25':'Закарпатська', '26':'Запорізька', '27':'Житомирська'
 };
+const CAPITALS = [
+  ['UA-30', 'Київ', 50.45466, 30.5238, 0],
+  ['UA-63', 'Харків', 49.98177, 36.25475, 1],
+  ['UA-46', 'Львів', 49.83826, 24.02324, 1],
+  ['UA-51', 'Одеса', 46.48572, 30.74383, 1],
+  ['UA-12', 'Дніпро', 48.46664, 35.04066, 1],
+  ['UA-14', 'Донецьк', 48.023, 37.80224, 1],
+  ['UA-43', 'Сімферополь', 44.95719, 34.11079, 1],
+  ['UA-05', 'Вінниця', 49.2322, 28.46871, 2],
+  ['UA-07', 'Луцьк', 50.75784, 25.35024, 2],
+  ['UA-18', 'Житомир', 50.26235, 28.67913, 2],
+  ['UA-21', 'Ужгород', 48.6242, 22.2947, 2],
+  ['UA-23', 'Запоріжжя', 47.85167, 35.11714, 2],
+  ['UA-26', 'Івано-Франківськ', 48.92312, 24.71248, 2],
+  ['UA-35', 'Кропивницький', 48.50834, 32.26618, 2],
+  ['UA-09', 'Луганськ', 48.56814, 39.30553, 2],
+  ['UA-48', 'Миколаїв', 46.97625, 31.99296, 2],
+  ['UA-53', 'Полтава', 49.58925, 34.55367, 2],
+  ['UA-56', 'Рівне', 50.62036, 26.23695, 2],
+  ['UA-59', 'Суми', 50.91741, 34.79906, 2],
+  ['UA-61', 'Тернопіль', 49.55404, 25.59067, 2],
+  ['UA-65', 'Херсон', 46.63695, 32.61458, 2],
+  ['UA-68', 'Хмельницький', 49.41835, 26.97936, 2],
+  ['UA-71', 'Черкаси', 49.44452, 32.05738, 2],
+  ['UA-77', 'Чернівці', 48.29045, 25.93241, 2],
+  ['UA-74', 'Чернігів', 51.50541, 31.28656, 2],
+  ['UA-40', 'Севастополь', 44.60795, 33.52134, 2]
+];
 
 let map;
 let allBounds;
@@ -163,28 +191,29 @@ function selectRegion(code, focus = false) {
 function layoutLabels() {
   if (!map || !labelMarkers.size) return;
   const zoom = map.getZoom();
-  const strength = Math.max(0, Math.min(1, (zoom - 5.05) / 0.75));
-  const labelSize = 8 + Math.max(0, Math.min(1, (zoom - 5.1) / 1.6)) * 1.5;
-  for (const region of regionMeta) {
-    const icon = labelMarkers.get(region.code)?.getElement();
-    const text = icon?.querySelector('.oblast-label-text');
-    if (!icon || !text) continue;
-    if (icon) icon.classList.remove('hidden');
-    if (icon) icon.style.opacity = region.code === 'UA-30' ? '0.78' : String(strength * 0.62);
-    text.style.fontSize = (region.code === 'UA-30' ? Math.max(8.5, labelSize) : labelSize).toFixed(1) + 'px';
-    if (zoom <= 5.05 && region.code !== 'UA-30') {
+  const settlementNamesVisible = zoom >= 7 && settlementPlaces.length > 0;
+  const occupied = [];
+  const viewport = map.getContainer().getBoundingClientRect();
+  const ordered = [...CAPITALS].sort((a, b) =>
+    (a[0] === selectedCode ? -1 : a[4]) - (b[0] === selectedCode ? -1 : b[4]));
+  for (const [code, , , , rank] of ordered) {
+    const icon = labelMarkers.get(code)?.getElement();
+    if (!icon) continue;
+    icon.classList.remove('hidden');
+    const hiddenByScale = settlementNamesVisible || (zoom < 5.25 && rank > 0) ||
+      (zoom < 5.85 && rank > 1);
+    if (hiddenByScale) { icon.classList.add('hidden'); continue; }
+    const rect = icon.querySelector('.capital-label-text')?.getBoundingClientRect();
+    if (!rect || rect.right < viewport.left || rect.left > viewport.right ||
+        rect.bottom < viewport.top || rect.top > viewport.bottom) continue;
+    if (occupied.some(other => rect.left < other.right + 6 && rect.right > other.left - 6 &&
+        rect.top < other.bottom + 4 && rect.bottom > other.top - 4)) {
       icon.classList.add('hidden');
-      continue;
-    }
-    if (zoom >= 8.4 && region.code !== selectedCode) {
-      icon.classList.add('hidden');
-      continue;
-    }
-    if (window.innerWidth < 600 && zoom < 6.15 && !region.priority && region.code !== selectedCode && region.code !== 'UA-30') {
-      icon.classList.add('hidden');
-      continue;
+    } else {
+      occupied.push(rect);
     }
   }
+  updateExternalLabels();
 }
 
 function addUkraineImagery(geometry) {
@@ -254,8 +283,14 @@ function updateExternalLabels() {
     marker.getElement()?.classList.toggle('hidden', !show);
     if (show) eligible.push(item);
   }
-  const occupied = [];
   const viewport = map.getContainer().getBoundingClientRect();
+  const occupied = [...labelMarkers.values()].flatMap(marker => {
+    const icon = marker.getElement();
+    if (!icon || icon.classList.contains('hidden')) return [];
+    const rect = icon.querySelector('.capital-label-text')?.getBoundingClientRect();
+    return rect && rect.right >= viewport.left && rect.left <= viewport.right &&
+      rect.bottom >= viewport.top && rect.top <= viewport.bottom ? [rect] : [];
+  });
   // Keep labels legible when several small border regions meet on screen.
   for (const { marker } of eligible.sort((a, b) =>
     (a.country === 'MDA' ? -1 : a.country === 'RUS' ? 1 : 0) -
@@ -447,17 +482,16 @@ async function refreshLiveData() {
 }
 
 function addLabels() {
-  for (const region of regionMeta) {
-    const city = ['UA-30', 'UA-40'].includes(region.code);
+  for (const [code, name, lat, lon] of CAPITALS) {
     const icon = L.divIcon({
-      className: 'oblast-label-icon' + (city ? ' city' : ''),
+      className: 'capital-label-icon',
       iconSize: [0, 0],
-      html: '<span class="oblast-label-text">' + escapeHtml(region.label) + '</span>'
+      html: '<span class="capital-label-text">' + escapeHtml(name) + '</span>'
     });
-    const marker = L.marker([region.lat, region.lon], {
+    const marker = L.marker([lat, lon], {
       icon, pane: 'labels', interactive: false, keyboard: false
     }).addTo(map);
-    labelMarkers.set(region.code, marker);
+    labelMarkers.set(code, marker);
   }
   map.on('moveend zoomend zoom resize', () => requestAnimationFrame(layoutLabels));
   document.fonts.ready.then(layoutLabels);
@@ -473,8 +507,8 @@ function updateSettlements() {
   settlementLayer.clearLayers();
   const zoom = map.getZoom();
   if (zoom < 7) return;
-  const minimumPopulation = zoom < 8 ? 100000 : zoom < 9 ? 12000 :
-    zoom < 10 ? 2500 : zoom < 11 ? 500 : zoom < 12 ? 50 : 0;
+  const minimumPopulation = zoom < 8 ? 20000 : zoom < 9 ? 5000 :
+    zoom < 10 ? 1000 : zoom < 11 ? 250 : zoom < 12 ? 50 : 0;
   const bounds = map.getBounds().pad(0.04);
   const viewport = map.getSize();
   const occupied = [];
@@ -505,6 +539,7 @@ async function loadSettlements() {
     settlementPlaces = data.places;
     map.attributionControl.addAttribution(GEONAMES_CREDIT);
     updateSettlements();
+    layoutLabels();
   } catch (error) {
     console.warn('Settlement names unavailable', error);
   }

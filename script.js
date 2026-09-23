@@ -15,7 +15,8 @@ let labelMarkers = new Map();
 let districtsByCode = new Map();
 let alertLayer;
 let countryBorderLayer;
-let externalLabelMarkers = [];
+let externalRegionLabels = [];
+let externalCountryLabels = [];
 let mapStyle = 'satellite';
 let alertState = 'disconnected';
 let activeDistrictCodes = [];
@@ -190,42 +191,52 @@ function addUkraineImagery(geometry) {
 }
 
 function updateExternalLabels() {
-  const show = map.getZoom() >= (window.innerWidth < 600 ? 7 : 5.5);
-  for (const marker of externalLabelMarkers) {
-    marker.getElement()?.classList.toggle('hidden', !show);
-  }
+  const zoom = map.getZoom();
+  const showRegions = zoom >= (window.innerWidth < 600 ? 7.5 : 7.1);
+  for (const marker of externalRegionLabels) marker.getElement()?.classList.toggle('hidden', !showRegions);
+  for (const marker of externalCountryLabels) marker.getElement()?.classList.toggle('hidden', showRegions || zoom < 4.65);
 }
 
 async function addExternalRegions() {
   try {
     const collections = await Promise.all(EXTERNAL_COUNTRIES.map(async country => {
-      const source = country === 'MDA' ? 'external-admin0' : 'external-admin1';
-      const response = await fetch(`./data/${source}/${country}.geojson`);
-      if (!response.ok) throw new Error(`External boundaries unavailable: ${country}`);
-      return response.json();
+      const paths = [`./data/external-admin0/${country}.geojson`];
+      if (country !== 'MDA') paths.push(`./data/external-admin1/${country}.geojson`);
+      const responses = await Promise.all(paths.map(path => fetch(path)));
+      if (responses.some(response => !response.ok)) throw new Error(`External boundaries unavailable: ${country}`);
+      return Promise.all(responses.map(response => response.json()));
     }));
-    for (const [index, collection] of collections.entries()) {
+    for (const [index, [outline, regions]] of collections.entries()) {
       const country = EXTERNAL_COUNTRIES[index];
-      L.geoJSON(collection, {
-        pane: 'externalRegions', interactive: false,
-        style: feature => ({
-          color: country === 'RUS' ? '#5b6d73' : '#69797c',
-          weight: country === 'MDA' ? 1.25 : country === 'RUS' ? 0.9 : 1,
-          opacity: (country === 'MDA' ? 0.82 : country === 'RUS' ? 0.62 : 0.7) * feature.properties.strength,
-          fill: false
-        })
+      if (regions) {
+        L.geoJSON(regions, {
+          pane: 'externalRegions', interactive: false,
+          style: { color: '#66767b', weight: 0.85, opacity: 0.52, fill: false }
+        }).addTo(map);
+      }
+      L.geoJSON(outline, {
+        pane: 'externalBorders', interactive: false,
+        style: { color: '#b4c4c3', weight: 1.75, opacity: 0.88, fill: false }
       }).addTo(map);
-      for (const feature of collection.features) {
+      const countryFeature = outline.features[0];
+      const [countryLon, countryLat] = countryFeature.properties.center;
+      const countryIcon = L.divIcon({
+        className: 'external-label-icon', iconSize: [0, 0],
+        html: '<span class="external-country-label">' + escapeHtml(countryFeature.properties.label) + '</span>'
+      });
+      externalCountryLabels.push(L.marker([countryLat, countryLon], {
+        icon: countryIcon, pane: 'externalLabels', interactive: false, keyboard: false
+      }).addTo(map));
+      for (const feature of regions?.features || []) {
+        if (!feature.properties.showLabel) continue;
         const [lon, lat] = feature.properties.center;
         const icon = L.divIcon({
           className: 'external-label-icon', iconSize: [0, 0],
           html: '<span class="external-label-text">' + escapeHtml(feature.properties.label) + '</span>'
         });
-        const marker = L.marker([lat, lon], {
+        externalRegionLabels.push(L.marker([lat, lon], {
           icon, pane: 'externalLabels', interactive: false, keyboard: false
-        }).addTo(map);
-        marker.getElement()?.style.setProperty('opacity', String(feature.properties.strength));
-        externalLabelMarkers.push(marker);
+        }).addTo(map));
       }
     }
     map.attributionControl.addAttribution(EXTERNAL_CREDIT);
@@ -296,10 +307,11 @@ async function init() {
     worldCopyJump: true
   });
   L.control.attribution({ prefix: false, position: 'bottomright' }).addTo(map);
-  for (const [name, zIndex] of [['externalRegions', 375], ['externalLabels', 390], ['provinces', 410], ['countryBorder', 430], ['alerts', 450], ['labels', 650]]) {
+  for (const [name, zIndex] of [['externalRegions', 375], ['externalBorders', 385], ['externalLabels', 390], ['provinces', 410], ['countryBorder', 430], ['alerts', 450], ['labels', 650]]) {
     map.createPane(name).style.zIndex = zIndex;
   }
   map.getPane('externalRegions').style.pointerEvents = 'none';
+  map.getPane('externalBorders').style.pointerEvents = 'none';
   map.getPane('externalLabels').style.pointerEvents = 'none';
   map.getPane('countryBorder').style.pointerEvents = 'none';
   map.getPane('labels').style.pointerEvents = 'none';

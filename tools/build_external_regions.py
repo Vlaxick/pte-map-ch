@@ -1,4 +1,4 @@
-"""Build external ADM1 regions and Moldova's ADM0 contour from pinned geoBoundaries data.
+"""Build nearby ADM1 regions and country outlines from pinned geoBoundaries data.
 
 Run `python3 tools/build_external_regions.py`. Source files are downloaded only
 when missing from the optional cache directory passed as the first argument.
@@ -22,26 +22,26 @@ NEIGHBOR_NAMES = {
     "HUN": {"Szabolcs-Szatmár-Bereg"},
     "ROU": {"SATU MARE", "MARAMURES", "SUCEAVA", "BOTOSANI", "GALATI", "TULCEA"},
 }
+COUNTRY_LABELS = {
+    "RUS": ("Росія", [38.2, 51.5]),
+    "BLR": ("Білорусь", [28.1, 52.5]),
+    "POL": ("Польща", [22.0, 50.9]),
+    "SVK": ("Словаччина", [21.15, 48.75]),
+    "HUN": ("Угорщина", [21.15, 47.4]),
+    "ROU": ("Румунія", [25.1, 46.1]),
+    "MDA": ("Молдова", [28.45, 47.2]),
+}
+RUSSIAN_LABELS = {
+    "Belgorod Oblast", "Bryansk Oblast", "Kursk Oblast", "Voronezh Oblast",
+    "Rostov Oblast", "Lipetsk Oblast", "Oryol Oblast", "Tambov Oblast",
+    "Smolensk Oblast", "Tula Oblast", "Kaluga Oblast", "Moscow Oblast",
+    "Volgograd Oblast", "Saratov Oblast", "Astrakhan Oblast", "Krasnodar Krai",
+}
 
 
-def context_strength(iso, name, center):
-    """Keep the near half of three neighbors and soften their outer edge."""
-    lon, lat = center
-    if iso == "RUS":
-        return 1.0
-    if iso in ("BLR", "SVK"):
-        return 1.0 if name in NEIGHBOR_NAMES[iso] else 0.0
-    if iso == "POL":
-        distance = lon - 19.2
-    elif iso == "HUN":
-        distance = lon - 19.25
-    else:  # ROU: the southern edge slopes toward the Danube delta.
-        distance = lat - (46.0 - 0.15 * (lon - 22))
-    if distance < 0:
-        return 0.0
-    if name in NEIGHBOR_NAMES[iso]:
-        return 1.0
-    return round(min(1.0, max(0.28, distance / 1.1)), 2)
+def context_strength(iso, name):
+    """Keep Russian regions and only the primary border regions elsewhere."""
+    return 1.0 if iso == "RUS" or name in NEIGHBOR_NAMES[iso] else 0.0
 UKRAINIAN_LABELS = {
     "Belgorod Oblast": "Бєлгородська", "Bryansk Oblast": "Брянська",
     "Kursk Oblast": "Курська", "Voronezh Oblast": "Воронезька",
@@ -144,15 +144,15 @@ def main():
         chosen = []
         for feature in source["features"]:
             name = feature["properties"]["shapeName"]
-            center = label_center(feature["geometry"])
-            strength = context_strength(iso, name, center)
+            strength = context_strength(iso, name)
             if not strength:
                 continue
             geometry = simplify_geometry(feature["geometry"])
             chosen.append({"type": "Feature", "geometry": geometry, "properties": {
                 "id": feature["properties"]["shapeID"], "country": iso,
                 "name": name, "label": UKRAINIAN_LABELS.get(name, name.title() if iso == "ROU" else name),
-                "center": label_center(geometry), "strength": strength
+                "center": label_center(geometry), "strength": strength,
+                "showLabel": iso != "RUS" or name in RUSSIAN_LABELS
             }})
         if iso != "RUS":
             missing = NEIGHBOR_NAMES[iso] - {f["properties"]["name"] for f in chosen}
@@ -164,28 +164,27 @@ def main():
         output.write_text(json.dumps({"type": "FeatureCollection", "features": chosen}, ensure_ascii=False, separators=(",", ":")))
         print(f"{iso}: {len(chosen)} regions, {output.stat().st_size:,} bytes")
 
-    # The 37 Moldovan raions create an unreadable cluster at this map scale.
-    moldova_cache = CACHE / "MDA-adm0.geojson"
-    if not moldova_cache.exists():
-        url = (f"https://github.com/wmgeolab/geoBoundaries/raw/{REVISION}/"
-               "releaseData/gbOpen/MDA/ADM0/geoBoundaries-MDA-ADM0_simplified.geojson")
-        urllib.request.urlretrieve(url, moldova_cache)
-    moldova_source = json.loads(moldova_cache.read_text())
-    if len(moldova_source["features"]) != 1:
-        raise ValueError("Unexpected Moldova ADM0 count")
-    feature = moldova_source["features"][0]
-    geometry = simplify_geometry(feature["geometry"])
-    moldova = {"type": "Feature", "geometry": geometry, "properties": {
-        "id": feature["properties"]["shapeID"], "country": "MDA",
-        "name": feature["properties"]["shapeName"], "label": "Молдова",
-        "center": label_center(geometry), "strength": 1.0
-    }}
     adm0_output = ROOT / "data" / "external-admin0"
     adm0_output.mkdir(parents=True, exist_ok=True)
-    output = adm0_output / "MDA.geojson"
-    output.write_text(json.dumps({"type": "FeatureCollection", "features": [moldova]}, ensure_ascii=False, separators=(",", ":")))
-    (OUTPUT / "MDA.geojson").unlink(missing_ok=True)
-    print(f"MDA ADM0: 1 country, {output.stat().st_size:,} bytes")
+    for iso, (label, center) in COUNTRY_LABELS.items():
+        path = CACHE / f"{iso}-adm0.geojson"
+        if not path.exists():
+            url = (f"https://github.com/wmgeolab/geoBoundaries/raw/{REVISION}/"
+                   f"releaseData/gbOpen/{iso}/ADM0/geoBoundaries-{iso}-ADM0_simplified.geojson")
+            urllib.request.urlretrieve(url, path)
+        source = json.loads(path.read_text())
+        if len(source["features"]) != 1:
+            raise ValueError(f"Unexpected {iso} ADM0 count")
+        feature = source["features"][0]
+        geometry = simplify_geometry(feature["geometry"])
+        country = {"type": "Feature", "geometry": geometry, "properties": {
+            "id": feature["properties"]["shapeID"], "country": iso,
+            "name": feature["properties"]["shapeName"], "label": label,
+            "center": center, "strength": 1.0
+        }}
+        output = adm0_output / f"{iso}.geojson"
+        output.write_text(json.dumps({"type": "FeatureCollection", "features": [country]}, ensure_ascii=False, separators=(",", ":")))
+        print(f"{iso} ADM0: 1 country, {output.stat().st_size:,} bytes")
 
 
 if __name__ == "__main__":

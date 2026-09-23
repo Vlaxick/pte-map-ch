@@ -6,6 +6,16 @@ const EXTERNAL_COUNTRIES = ['RUS', 'BLR', 'POL', 'SVK', 'HUN', 'ROU', 'MDA'];
 const EXTERNAL_CREDIT = '<a href="https://www.geoboundaries.org/" target="_blank" rel="noopener noreferrer">External regions: geoBoundaries gbOpen</a>';
 const NEPTUN_API = 'https://neptun.in.ua/api/v1';
 const POLL_INTERVAL_MS = 15000;
+const GEONAMES_CREDIT = '<a href="https://www.geonames.org/export/" target="_blank" rel="noopener noreferrer">Settlements: GeoNames CC BY</a>';
+const SETTLEMENT_REGIONS = {
+  '01':'Черкаська', '02':'Чернігівська', '03':'Чернівецька', '04':'Дніпропетровська',
+  '05':'Донецька', '06':'Івано-Франківська', '07':'Харківська', '08':'Херсонська',
+  '09':'Хмельницька', '10':'Кіровоградська', '11':'АР Крим', '12':'Київ',
+  '13':'Київська', '14':'Луганська', '15':'Львівська', '16':'Миколаївська',
+  '17':'Одеська', '18':'Полтавська', '19':'Рівненська', '20':'Севастополь',
+  '21':'Сумська', '22':'Тернопільська', '23':'Вінницька', '24':'Волинська',
+  '25':'Закарпатська', '26':'Запорізька', '27':'Житомирська'
+};
 
 let map;
 let allBounds;
@@ -27,6 +37,11 @@ let activeOblasts = [];
 let activeThreats = [];
 let threatState = 'disconnected';
 let refreshInFlight = false;
+let settlementPlaces = [];
+let settlementLayer;
+let searchMarker;
+let currentSearchResults = [];
+let highlightedSearchResult = 0;
 
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, char => ({
@@ -157,6 +172,10 @@ function layoutLabels() {
     if (icon) icon.style.opacity = region.code === 'UA-30' ? '0.78' : String(strength * 0.62);
     text.style.fontSize = (region.code === 'UA-30' ? Math.max(8.5, labelSize) : labelSize).toFixed(1) + 'px';
     if (zoom <= 5.05 && region.code !== 'UA-30') {
+      icon.classList.add('hidden');
+      continue;
+    }
+    if (zoom >= 8.4 && region.code !== selectedCode) {
       icon.classList.add('hidden');
       continue;
     }
@@ -293,11 +312,14 @@ async function addExternalRegions() {
   }
 }
 
-function alertStyle(level, oblast = false) {
+function alertStyle(level, oblast = false, name = '') {
   const red = level === 'red';
+  const key = regionKey(name);
+  const flagFill = red && /луган/.test(key) ? '#347bc5' :
+    red && /крим/.test(key) ? '#d4ad3c' : null;
   return {
-    pane: 'alerts', color: red ? '#c7837d' : '#c4a465', weight: oblast ? 1.45 : 1.25,
-    opacity: 0.8, fillColor: red ? '#913f45' : '#9a7127',
+    pane: 'alerts', color: red ? '#c7837d' : '#c4a465', weight: flagFill ? 2 : oblast ? 1.45 : 1.25,
+    opacity: 0.8, fillColor: flagFill || (red ? '#913f45' : '#9a7127'),
     fillOpacity: oblast ? 0.62 : 0.67
   };
 }
@@ -317,7 +339,7 @@ function renderAlerts(data) {
       seenOblasts.add(oblast.key);
       activeOblasts.push(oblast);
       L.geoJSON(feature, { pane: 'alerts', interactive: false,
-        style: alertStyle(oblast.level, true) }).addTo(alertLayer);
+        style: alertStyle(oblast.level, true, oblast.oblast || oblast.name || oblast.key) }).addTo(alertLayer);
     }
     const seenRaions = new Set();
     for (const raion of data.raions) {
@@ -326,7 +348,7 @@ function renderAlerts(data) {
       seenRaions.add(raion.key);
       activeRaions.push(raion);
       L.geoJSON(feature, { pane: 'alerts', interactive: false,
-        style: alertStyle(raion.level) }).addTo(alertLayer);
+        style: alertStyle(raion.level, false, raion.oblast || raion.key) }).addTo(alertLayer);
     }
   }
   setStatus();
@@ -419,6 +441,167 @@ function addLabels() {
   requestAnimationFrame(layoutLabels);
 }
 
+function normalizeSearch(value) {
+  return String(value || '').toLocaleLowerCase('uk').replace(/[ʼ’'`\-]/g, '').trim();
+}
+
+function updateSettlements() {
+  if (!settlementLayer || !settlementPlaces.length) return;
+  settlementLayer.clearLayers();
+  const zoom = map.getZoom();
+  if (zoom < 7) return;
+  const minimumPopulation = zoom < 8 ? 100000 : zoom < 9 ? 12000 :
+    zoom < 10 ? 2500 : zoom < 11 ? 500 : zoom < 12 ? 50 : 0;
+  const bounds = map.getBounds().pad(0.04);
+  const viewport = map.getSize();
+  const occupied = [];
+  let shown = 0;
+  // The index is ordered by population: prominent settlements get priority when labels collide.
+  for (const place of settlementPlaces) {
+    if (place[3] < minimumPopulation || shown >= 220) break;
+    if (!bounds.contains([place[1], place[2]])) continue;
+    const point = map.latLngToContainerPoint([place[1], place[2]]);
+    if (point.x < 0 || point.y < 0 || point.x > viewport.x || point.y > viewport.y) continue;
+    const width = Math.min(175, place[0].length * (place[3] >= 100000 ? 6.4 : 5.7) + 11);
+    const box = { left: point.x + 5, right: point.x + width, top: point.y - 7, bottom: point.y + 8 };
+    if (occupied.some(other => box.left < other.right + 7 && box.right > other.left - 7 &&
+        box.top < other.bottom + 5 && box.bottom > other.top - 5)) continue;
+    occupied.push(box);
+    const icon = L.divIcon({ className: `settlement-label-icon${place[3] >= 100000 ? ' major' : ''}`,
+      iconSize: [0, 0], html: `<span class="settlement-label-text">${escapeHtml(place[0])}</span>` });
+    L.marker([place[1], place[2]], { icon, pane: 'settlements', interactive: false, keyboard: false }).addTo(settlementLayer);
+    shown++;
+  }
+}
+
+async function loadSettlements() {
+  try {
+    const response = await fetch('./data/settlements.json');
+    if (!response.ok) throw new Error(`Settlements HTTP ${response.status}`);
+    const data = await response.json();
+    settlementPlaces = data.places;
+    map.attributionControl.addAttribution(GEONAMES_CREDIT);
+    updateSettlements();
+  } catch (error) {
+    console.warn('Settlement names unavailable', error);
+  }
+}
+
+function searchMatches(query) {
+  const term = normalizeSearch(query);
+  if (!term) return [];
+  const regions = regionMeta.filter(region => normalizeSearch(region.name).includes(term) ||
+    normalizeSearch(region.label).includes(term)).slice(0, 3).map(region => ({ type: 'region', region }));
+  if (term.length < 2) return regions;
+  const exact = [];
+  const prefix = [];
+  const partial = [];
+  // The index is already population-ranked, so the first matches are useful search suggestions.
+  for (const place of settlementPlaces) {
+    const name = normalizeSearch(place[0]);
+    const alternate = normalizeSearch(place[5]);
+    if (name === term || alternate === term) {
+      if (exact.length < 7) exact.push({ type: 'place', place });
+    } else if (name.startsWith(term) || alternate.startsWith(term)) {
+      if (prefix.length < 7) prefix.push({ type: 'place', place });
+    } else if (name.includes(term) || alternate.includes(term)) {
+      if (partial.length < 7) partial.push({ type: 'place', place });
+    }
+  }
+  return [...regions, ...exact, ...prefix, ...partial].slice(0, 8);
+}
+
+function hideSearchResults() {
+  $('searchResults').hidden = true;
+  $('regionSearch').setAttribute('aria-expanded', 'false');
+}
+
+function showSearchResults() {
+  const results = $('searchResults');
+  currentSearchResults = searchMatches($('regionSearch').value);
+  highlightedSearchResult = 0;
+  const query = $('regionSearch').value.trim();
+  if (!query) { hideSearchResults(); return; }
+  results.innerHTML = currentSearchResults.length ? currentSearchResults.map((item, index) => {
+    const name = item.type === 'region' ? item.region.name : item.place[0];
+    const meta = item.type === 'region' ? 'Область' :
+      `${item.place[6] ? item.place[6] + ' · ' : ''}${SETTLEMENT_REGIONS[item.place[4]] || 'Україна'}`;
+    return `<button type="button" class="search-item${index === 0 ? ' active' : ''}" role="option" data-index="${index}" aria-selected="${index === 0}"><strong>${escapeHtml(name)}</strong><small>${escapeHtml(meta)}</small></button>`;
+  }).join('') : '<div class="search-empty">Нічого не знайдено</div>';
+  results.hidden = false;
+  $('regionSearch').setAttribute('aria-expanded', 'true');
+}
+
+function chooseSearchResult(index) {
+  const item = currentSearchResults[index];
+  if (!item) return;
+  hideSearchResults();
+  if (searchMarker) { map.removeLayer(searchMarker); searchMarker = null; }
+  if (item.type === 'region') {
+    $('regionSearch').value = item.region.name;
+    selectRegion(item.region.code, true);
+  } else {
+    const place = item.place;
+    $('regionSearch').value = place[0];
+    selectRegion(null);
+    const icon = L.divIcon({ className: 'search-pin', iconSize: [16, 16], iconAnchor: [8, 8],
+      html: '<span class="search-pin-dot"></span>' });
+    searchMarker = L.marker([place[1], place[2]], { icon, pane: 'searchPins', title: place[0] }).addTo(map);
+    const location = [place[6], SETTLEMENT_REGIONS[place[4]] || 'Україна'].filter(Boolean).join(' · ');
+    searchMarker.bindPopup(`<strong>${escapeHtml(place[0])}</strong><br><small>${escapeHtml(location)} · GeoNames</small>`);
+    map.flyTo([place[1], place[2]], place[3] >= 100000 ? 11 : 13, { duration: 0.65 });
+    map.once('moveend', () => searchMarker?.openPopup());
+  }
+  $('regionSearch').blur();
+}
+
+function setupSearch() {
+  const input = $('regionSearch');
+  input.addEventListener('input', showSearchResults);
+  input.addEventListener('focus', showSearchResults);
+  $('searchResults').addEventListener('click', event => {
+    const button = event.target.closest('[data-index]');
+    if (button) chooseSearchResult(Number(button.dataset.index));
+  });
+  input.addEventListener('keydown', event => {
+    if (event.key === 'Escape') { hideSearchResults(); input.value = ''; return; }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      if (!currentSearchResults.length) return;
+      highlightedSearchResult = (highlightedSearchResult + (event.key === 'ArrowDown' ? 1 : -1) +
+        currentSearchResults.length) % currentSearchResults.length;
+      for (const option of $('searchResults').querySelectorAll('.search-item')) {
+        const active = Number(option.dataset.index) === highlightedSearchResult;
+        option.classList.toggle('active', active);
+        option.setAttribute('aria-selected', String(active));
+      }
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      chooseSearchResult(highlightedSearchResult);
+    }
+  });
+  document.addEventListener('pointerdown', event => {
+    if (!event.target.closest('.search-wrap')) hideSearchResults();
+  });
+}
+
+function setupHelp() {
+  const panel = $('helpPanel');
+  const toggle = $('helpToggle');
+  const setOpen = open => {
+    panel.hidden = !open;
+    toggle.setAttribute('aria-expanded', String(open));
+  };
+  toggle.onclick = () => setOpen(panel.hidden);
+  $('helpClose').onclick = () => setOpen(false);
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape') setOpen(false);
+  });
+  document.addEventListener('pointerdown', event => {
+    if (!panel.hidden && !event.target.closest('#helpPanel, #helpToggle')) setOpen(false);
+  });
+}
+
 async function init() {
   if (location.protocol === 'file:') {
     document.querySelector('.app').classList.add('startup-error');
@@ -437,11 +620,11 @@ async function init() {
   }
   map = L.map('map', {
     zoomControl: false, attributionControl: false, preferCanvas: false,
-    minZoom: 3, maxZoom: 13, zoomSnap: 0.25, zoomDelta: 0.5,
+    minZoom: 3, maxZoom: 18, zoomSnap: 0.25, zoomDelta: 0.5,
     worldCopyJump: true
   });
   L.control.attribution({ prefix: false, position: 'bottomright' }).addTo(map);
-  for (const [name, zIndex] of [['externalRegions', 375], ['externalBorders', 385], ['externalLabels', 390], ['provinces', 410], ['alerts', 450], ['provinceOutlines', 460], ['countryBorder', 465], ['threats', 470], ['labels', 650]]) {
+  for (const [name, zIndex] of [['externalRegions', 375], ['externalBorders', 385], ['externalLabels', 390], ['provinces', 410], ['alerts', 450], ['provinceOutlines', 460], ['countryBorder', 465], ['settlements', 630], ['labels', 650], ['threats', 670], ['searchPins', 710]]) {
     map.createPane(name).style.zIndex = zIndex;
   }
   map.getPane('externalRegions').style.pointerEvents = 'none';
@@ -450,6 +633,7 @@ async function init() {
   map.getPane('provinceOutlines').style.pointerEvents = 'none';
   map.getPane('countryBorder').style.pointerEvents = 'none';
   map.getPane('labels').style.pointerEvents = 'none';
+  map.getPane('settlements').style.pointerEvents = 'none';
   map.attributionControl.addAttribution(OCHA_CREDIT);
   try {
     const urls = [
@@ -499,6 +683,7 @@ async function init() {
     }).addTo(map);
     alertLayer = L.layerGroup().addTo(map);
     threatLayer = L.layerGroup().addTo(map);
+    settlementLayer = L.layerGroup().addTo(map);
     allBounds = L.geoJSON(country).getBounds();
     const fitAll = () => {
       const compact = map.getSize().x < 600;
@@ -515,7 +700,9 @@ async function init() {
     });
     addLabels();
     addExternalRegions();
+    loadSettlements();
     map.on('zoomend moveend resize', updateExternalLabels);
+    map.on('zoomend moveend resize', updateSettlements);
     $('mapStyleToggle').onclick = () => setMapStyle(mapStyle === 'dark' ? 'satellite' : 'dark');
     try {
       if (localStorage.getItem('obriy-map-style') === 'dark') setMapStyle('dark');
@@ -525,24 +712,12 @@ async function init() {
     $('resetView').onclick = () => {
       selectRegion(null);
       $('regionSearch').value = '';
+      hideSearchResults();
+      if (searchMarker) { map.removeLayer(searchMarker); searchMarker = null; }
       fitAll();
     };
-    $('regionSearch').addEventListener('keydown', event => {
-      if (event.key === 'Enter') {
-        const query = event.currentTarget.value.trim().toLocaleLowerCase('uk');
-        const match = regionMeta.find(region =>
-          region.name.toLocaleLowerCase('uk').includes(query) ||
-          region.label.toLocaleLowerCase('uk').includes(query)
-        );
-        if (query && match) {
-          selectRegion(match.code, true);
-          event.currentTarget.blur();
-        }
-      } else if (event.key === 'Escape') {
-        event.currentTarget.value = '';
-        selectRegion(null);
-      }
-    });
+    setupSearch();
+    setupHelp();
     document.addEventListener('keydown', event => {
       if (event.key === 'Escape') selectRegion(null);
     });

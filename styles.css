@@ -17,19 +17,17 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid #dfc8
 .map.dark-mode .leaflet-tile-pane{filter:brightness(.38) saturate(.35) contrast(1.18)}
 .uav-threat-marker{background:none;border:0}
 .uav-threat-icon{
-  position:relative;display:block;width:38px;height:38px;border-radius:50%;
-  background:radial-gradient(circle,#b5712b90 0%,#7b431e78 48%,transparent 74%);
+  position:relative;display:block;width:32px;height:32px;
+  transform:rotate(var(--heading,0deg));transform-origin:50% 50%;
 }
-.uav-threat-icon.approximate::after{
-  content:'';position:absolute;inset:2px;border:1px dashed #f2cd78c9;border-radius:50%;
+.uav-threat-icon.has-heading::before{
+  content:'';position:absolute;left:50%;top:-4px;width:2px;height:10px;
+  transform:translateX(-50%);border-radius:2px;background:#f5e8c7;
+  box-shadow:0 0 3px #080b0ce0;
 }
-.uav-threat-icon.advisory{
-  background:radial-gradient(circle,#8da9b080 0%,#536a7770 48%,transparent 74%);
-  opacity:.75;
-}
-.uav-threat-icon.advisory::after{border-color:#a9c1c9}
+.uav-threat-icon.advisory{opacity:.66}
 .uav-threat-icon img{
-  position:absolute;inset:0;width:38px;height:38px;object-fit:contain;
+  position:absolute;inset:0;width:32px;height:32px;object-fit:contain;
   filter:drop-shadow(0 1px 2px #080b0ce0);
 }
 .leaflet-control-attribution{

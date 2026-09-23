@@ -18,6 +18,7 @@ let alertOblastsByKey = new Map();
 let alertLayer;
 let threatLayer;
 let countryBorderLayer;
+let provinceBorderLayer;
 let externalRegionLabels = [];
 let mapStyle = 'satellite';
 let alertState = 'disconnected';
@@ -37,20 +38,27 @@ function provinceStyle(selected = false) {
   if (mapStyle === 'dark') {
     return {
       pane: 'provinces',
-      color: selected ? '#f0c78b' : '#708790',
-      weight: selected ? 2.3 : 1.15,
-      opacity: selected ? 1 : 0.8,
+      color: selected ? '#f0c78b' : '#657980',
+      weight: selected ? 2.3 : 0.7,
+      opacity: selected ? 1 : 0.4,
       fillColor: selected ? '#79674d' : '#1c2c39',
       fillOpacity: selected ? 0.6 : 0.83
     };
   }
   return {
     pane: 'provinces',
-    color: selected ? '#dac995' : '#b6c2b9',
-    weight: selected ? 2 : 1,
-    opacity: selected ? 0.95 : 0.66,
+    color: selected ? '#dac995' : '#80918e',
+    weight: selected ? 2 : 0.7,
+    opacity: selected ? 0.95 : 0.4,
     fillColor: selected ? '#d6b778' : '#c5d9cc',
     fillOpacity: selected ? 0.2 : 0.035
+  };
+}
+
+function provinceOutlineStyle() {
+  return {
+    pane: 'provinceOutlines', color: mapStyle === 'dark' ? '#91a4a7' : '#b6c6bd',
+    weight: 1.45, opacity: 0.82, fill: false
   };
 }
 
@@ -65,6 +73,7 @@ function setMapStyle(style) {
   button.setAttribute('aria-label', dark ? 'Увімкнути супутникову карту' : 'Увімкнути темну карту');
   button.title = dark ? 'Супутникова карта' : 'Темна карта';
   for (const [code, layer] of regionLayers) layer.setStyle(provinceStyle(code === selectedCode));
+  provinceBorderLayer.setStyle(provinceOutlineStyle());
   countryBorderLayer.setStyle({ color: dark ? '#a7bac0' : '#e8eee8' });
   try { localStorage.setItem('obriy-map-style', mapStyle); } catch {}
 }
@@ -334,14 +343,17 @@ function renderThreats(data) {
         !Number.isFinite(Number(threat.lat)) || !Number.isFinite(Number(threat.lon))) continue;
     const approximate = threat.positionQuality !== 'precise' || Number(threat.uncertaintyKm) > 0;
     const advisory = threat.advisory === true;
+    const rawHeading = threat.heading == null ? NaN : Number(threat.heading);
+    const heading = Number.isFinite(rawHeading) && isFresh(threat.updatedAt, 600000)
+      ? ((rawHeading % 360) + 360) % 360 : null;
     const color = advisory ? '#9ab5c0' : threat.type === 'ballistic' || threat.type === 'missile'
       ? '#fa8180' : '#f1c980';
     const marker = threat.type === 'uav'
       ? L.marker([Number(threat.lat), Number(threat.lon)], {
-        pane: 'threats', title: threat.title || 'БпЛА',
+        pane: 'threats', title: `${threat.title || 'БпЛА'}${heading == null ? '' : ` · орієнтовний курс ${Math.round(heading)}°`}`,
         icon: L.divIcon({
-          className: 'uav-threat-marker', iconSize: [38, 38], iconAnchor: [19, 19],
-          html: `<span class="uav-threat-icon${advisory ? ' advisory' : ''}${approximate ? ' approximate' : ''}"><img src="./assets/shahed.png?v=2" alt="" /></span>`
+          className: 'uav-threat-marker', iconSize: [32, 32], iconAnchor: [16, 16],
+          html: `<span class="uav-threat-icon${advisory ? ' advisory' : ''}${heading == null ? '' : ' has-heading'}" style="--heading:${heading == null ? 0 : heading.toFixed(1)}deg"><img src="./assets/shahed.png?v=2" alt="" /></span>`
         })
       }).addTo(threatLayer)
       : L.circleMarker([Number(threat.lat), Number(threat.lon)], {
@@ -353,7 +365,8 @@ function renderThreats(data) {
     const uncertainty = Number(threat.uncertaintyKm) > 0
       ? ` · похибка до ${escapeHtml(threat.uncertaintyKm)} км` : '';
     const category = advisory ? 'Спостереження' : 'Загроза';
-    marker.bindPopup(`<strong>${escapeHtml(threat.title || category)}</strong><br>${category} · ${quality}${uncertainty}<br>${escapeHtml(threat.region || '')}<br><small>Джерело: NEPTUN · ${escapeHtml(threat.updatedAt || '')}</small>`);
+    const course = heading == null ? '' : `<br><small>Орієнтовний курс: ${Math.round(heading)}° від півночі</small>`;
+    marker.bindPopup(`<strong>${escapeHtml(threat.title || category)}</strong><br>${category} · ${quality}${uncertainty}${course}<br>${escapeHtml(threat.region || '')}<br><small>Джерело: NEPTUN · ${escapeHtml(threat.updatedAt || '')}</small>`);
   }
   setStatus();
   renderSelectedCard();
@@ -414,12 +427,13 @@ async function init() {
     worldCopyJump: true
   });
   L.control.attribution({ prefix: false, position: 'bottomright' }).addTo(map);
-  for (const [name, zIndex] of [['externalRegions', 375], ['externalBorders', 385], ['externalLabels', 390], ['provinces', 410], ['countryBorder', 430], ['alerts', 450], ['threats', 470], ['labels', 650]]) {
+  for (const [name, zIndex] of [['externalRegions', 375], ['externalBorders', 385], ['externalLabels', 390], ['provinces', 410], ['alerts', 450], ['provinceOutlines', 460], ['countryBorder', 465], ['threats', 470], ['labels', 650]]) {
     map.createPane(name).style.zIndex = zIndex;
   }
   map.getPane('externalRegions').style.pointerEvents = 'none';
   map.getPane('externalBorders').style.pointerEvents = 'none';
   map.getPane('externalLabels').style.pointerEvents = 'none';
+  map.getPane('provinceOutlines').style.pointerEvents = 'none';
   map.getPane('countryBorder').style.pointerEvents = 'none';
   map.getPane('labels').style.pointerEvents = 'none';
   map.attributionControl.addAttribution(OCHA_CREDIT);
@@ -464,6 +478,10 @@ async function init() {
           }
         });
       }
+    }).addTo(map);
+    provinceBorderLayer = L.geoJSON(provinces, {
+      pane: 'provinceOutlines', interactive: false,
+      style: provinceOutlineStyle
     }).addTo(map);
     alertLayer = L.layerGroup().addTo(map);
     threatLayer = L.layerGroup().addTo(map);

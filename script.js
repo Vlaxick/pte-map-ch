@@ -283,9 +283,9 @@ async function addExternalRegions() {
 function alertStyle(level, oblast = false) {
   const red = level === 'red';
   return {
-    pane: 'alerts', color: red ? '#ff837a' : '#f5ce77', weight: oblast ? 2.2 : 2.6,
-    opacity: 0.95, fillColor: red ? '#d34347' : '#c99839',
-    fillOpacity: oblast ? 0.21 : 0.32
+    pane: 'alerts', color: red ? '#ff938d' : '#f5cf69', weight: oblast ? 2 : 2.45,
+    opacity: 0.96, fillColor: `url(#alert-${red ? 'red' : 'yellow'}-gradient)`,
+    fillOpacity: oblast ? 0.68 : 0.83
   };
 }
 
@@ -335,11 +335,19 @@ function renderThreats(data) {
     const advisory = threat.advisory === true;
     const color = advisory ? '#9ab5c0' : threat.type === 'ballistic' || threat.type === 'missile'
       ? '#fa8180' : '#f1c980';
-    const marker = L.circleMarker([Number(threat.lat), Number(threat.lon)], {
-      pane: 'threats', radius: advisory ? 5 : 7, color, weight: 2,
-      fillColor: color, fillOpacity: advisory ? 0.36 : 0.65,
-      dashArray: approximate ? '3 3' : undefined
-    }).addTo(threatLayer);
+    const marker = threat.type === 'uav'
+      ? L.marker([Number(threat.lat), Number(threat.lon)], {
+        pane: 'threats', title: threat.title || 'БпЛА',
+        icon: L.divIcon({
+          className: 'uav-threat-marker', iconSize: [38, 38], iconAnchor: [19, 19],
+          html: `<span class="uav-threat-icon${advisory ? ' advisory' : ''}${approximate ? ' approximate' : ''}"><img src="./assets/shahed.png?v=2" alt="" /></span>`
+        })
+      }).addTo(threatLayer)
+      : L.circleMarker([Number(threat.lat), Number(threat.lon)], {
+        pane: 'threats', radius: advisory ? 5 : 7, color, weight: 2,
+        fillColor: color, fillOpacity: advisory ? 0.36 : 0.65,
+        dashArray: approximate ? '3 3' : undefined
+      }).addTo(threatLayer);
     const quality = approximate ? 'Приблизне місце' : 'Повідомлене місце';
     const uncertainty = Number(threat.uncertaintyKm) > 0
       ? ` · похибка до ${escapeHtml(threat.uncertaintyKm)} км` : '';

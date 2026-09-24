@@ -1,6 +1,6 @@
 # External country contours
 
-These simplified ADM0 GeoJSON files come from [geoBoundaries gbOpen](https://www.geoboundaries.org/) at repository revision `9469f09`. They provide the distinct country borders behind the lighter regional lines. Belarus, Slovakia and Hungary are open lines clipped to the near half of the country; no artificial line closes the cut. Poland, Romania, Russia and Moldova retain their full outlines. The original contributing sources and licences are listed in the linked metadata.
+These simplified ADM0 GeoJSON files come from [geoBoundaries gbOpen](https://www.geoboundaries.org/) at repository revision `9469f09`. They provide the distinct country borders behind the lighter regional lines. Belarus is an open line clipped to the near half of the country; no artificial line closes the cut. Poland, Slovakia, Hungary, Romania, Russia and Moldova retain their full outlines. Moldova's feature also carries the map label position. The original contributing sources and licences are listed in the linked metadata.
 
 | File | Source metadata | Original year | Source licence |
 | --- | --- | ---: | --- |

@@ -60,6 +60,10 @@ let allBounds;
 let regionMeta = [];
 let selectedCode = null;
 let regionLayers = new Map();
+let regionFeatures = new Map();
+let focusImagery;
+let lastAlertsData = null;
+let lastThreatsData = null;
 let labelMarkers = new Map();
 let alertRaionsByKey = new Map();
 let alertOblastsByKey = new Map();
@@ -93,7 +97,7 @@ function provinceStyle(selected = false) {
     return {
       pane: 'provinces',
       color: selected ? '#f0c78b' : '#657980',
-      weight: selected ? 2.3 : 0.7,
+      weight: selected ? (selectedCode ? 3 : 2.3) : 0.7,
       opacity: selected ? 1 : 0.4,
       fillColor: selected ? '#79674d' : '#1c2c39',
       fillOpacity: selected ? 0.6 : 0.83
@@ -102,7 +106,7 @@ function provinceStyle(selected = false) {
   return {
     pane: 'provinces',
     color: selected ? '#dac995' : '#80918e',
-    weight: selected ? 2 : 0.7,
+    weight: selected ? (selectedCode ? 3 : 2) : 0.7,
     opacity: selected ? 0.95 : 0.4,
     fillColor: selected ? '#d6b778' : '#c5d9cc',
     fillOpacity: selected ? 0.2 : 0.035
@@ -126,10 +130,24 @@ function setMapStyle(style) {
   button.setAttribute('aria-pressed', String(dark));
   button.setAttribute('aria-label', dark ? 'Увімкнути супутникову карту' : 'Увімкнути темну карту');
   button.title = dark ? 'Супутникова карта' : 'Темна карта';
-  for (const [code, layer] of regionLayers) layer.setStyle(provinceStyle(code === selectedCode));
+  updateProvinceFocus();
   provinceBorderLayer.setStyle(provinceOutlineStyle());
   countryBorderLayer.setStyle({ color: dark ? '#b5c7c2' : '#d5e0d8' });
   try { localStorage.setItem('obriy-map-style', mapStyle); } catch {}
+}
+
+function updateProvinceFocus() {
+  for (const [code, layer] of regionLayers) {
+    layer.setStyle(provinceStyle(code === selectedCode));
+    const element = layer.getElement();
+    if (!element) continue;
+    const hidden = Boolean(selectedCode && code !== selectedCode);
+    element.style.pointerEvents = hidden ? 'none' : '';
+    element.setAttribute('tabindex', hidden ? '-1' : '0');
+    if (hidden) element.setAttribute('aria-hidden', 'true');
+    else element.removeAttribute('aria-hidden');
+    element.classList.toggle('focused-province', code === selectedCode);
+  }
 }
 
 function regionKey(value) {
@@ -179,26 +197,57 @@ function countForm(count, one, few, many) {
   return last === 1 ? one : last >= 2 && last <= 4 ? few : many;
 }
 
-function fitOverview(withPanel = false, animate = false) {
+function fitOverview(animate = false) {
   if (!map || !allBounds) return;
   const compact = map.getSize().x < 600;
-  const panelOnRight = withPanel && map.getSize().x > 900;
-  const mapEdge = map.getContainer().getBoundingClientRect().right;
-  const panelEdge = $('regionCard').getBoundingClientRect().left;
-  const rightPadding = panelOnRight ? Math.ceil(mapEdge - panelEdge + 18) : compact ? 12 : 80;
   const options = {
     paddingTopLeft: compact ? [12, 74] : [80, 105],
-    paddingBottomRight: [rightPadding, compact ? 36 : 70],
+    paddingBottomRight: compact ? [12, 36] : [80, 70],
     maxZoom: compact ? 6 : 6.25
   };
-  if (animate) map.flyToBounds(allBounds, { ...options, duration: 0.55 });
+  if (animate && !window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+    map.flyToBounds(allBounds, { ...options, duration: 0.75 });
   else map.fitBounds(allBounds, options);
+}
+
+function selectedRegionKey() {
+  return regionKey(regionMeta.find(region => region.code === selectedCode)?.name);
+}
+
+function fitSelectedRegion(animate = true) {
+  const layer = regionLayers.get(selectedCode);
+  if (!map || !layer) return;
+  const size = map.getSize();
+  const card = $('regionCard').getBoundingClientRect();
+  const desktop = size.x > 900;
+  const mapRect = map.getContainer().getBoundingClientRect();
+  const right = desktop ? Math.ceil(mapRect.right - card.left + 64) : 24;
+  const bottom = desktop ? 72 : Math.ceil(card.height + 32);
+  const options = {
+    paddingTopLeft: [desktop ? 64 : 24, desktop ? 138 : 128],
+    paddingBottomRight: [right, bottom],
+    maxZoom: desktop ? 10.25 : 9.5
+  };
+  if (animate && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    map.flyToBounds(layer.getBounds(), { ...options, duration: 1.15 });
+  } else {
+    map.fitBounds(layer.getBounds(), options);
+  }
+}
+
+function updateRegionImagery() {
+  if (focusImagery) {
+    map.removeLayer(focusImagery);
+    focusImagery = null;
+  }
+  const feature = regionFeatures.get(selectedCode);
+  if (feature) focusImagery = addUkraineImagery(feature.geometry, 'regionImagery');
 }
 
 function closeRegionPanel() {
   if (!selectedCode) return;
   selectRegion(null);
-  if (map.getSize().x > 900) fitOverview(false, true);
+  fitOverview(true);
 }
 
 function renderSelectedCard() {
@@ -216,6 +265,8 @@ function renderSelectedCard() {
   const oblastAlert = activeOblasts.find(oblast => regionKey(oblast.oblast || oblast.name) === key);
   const threats = activeThreats.filter(threat => regionKey(threat.region) === key)
     .sort((a, b) => Number(Boolean(a.advisory)) - Number(Boolean(b.advisory)));
+  const regionKind = selectedCode === 'UA-43' ? 'АР КРИМ' :
+    selectedCode === 'UA-30' || selectedCode === 'UA-40' ? 'МІСТО' : 'ОБЛАСТЬ';
   const scrollTop = card.querySelector('.region-panel-body')?.scrollTop || 0;
   const districtContent = alertState !== 'connected'
     ? '<p class="panel-empty">Дані про тривоги зараз недоступні.</p>'
@@ -234,7 +285,7 @@ function renderSelectedCard() {
         return `<li class="panel-threat"><span class="panel-threat-symbol" aria-hidden="true">${icon ? `<img src="${THREAT_ICONS[icon]}" alt="">` : '●'}</span><div class="panel-threat-details"><strong>${escapeHtml(threat.title || 'Об’єкт загрози')}</strong><span>${escapeHtml(place)}</span><span class="panel-course">${heading == null ? 'Напрямок не вказано' : `Напрямок: ${escapeHtml(directionText(heading))}`}</span></div>${threat.advisory ? '<span class="panel-advisory">Спостереження</span>' : ''}</li>`;
       }).join('')}</ul>`
       : '<p class="panel-empty">Об’єктів загроз у цій області зараз немає.</p>';
-  card.innerHTML = `<div class="card-head"><span>ОБЛАСТЬ / ${escapeHtml(selectedCode)}</span><a href="https://neptun.in.ua/" target="_blank" rel="noopener noreferrer">ДАНІ: NEPTUN ↗</a><button type="button" aria-label="Закрити панель області">×</button></div>
+  card.innerHTML = `<div class="card-head"><span>${regionKind} / ${escapeHtml(selectedCode)}</span><a href="https://neptun.in.ua/" target="_blank" rel="noopener noreferrer">ДАНІ: NEPTUN ↗</a><button type="button" aria-label="Закрити панель регіону">×</button></div>
     <div class="region-panel-body"><h2 id="regionPanelTitle">${escapeHtml(region.name)}</h2>
       <div class="panel-totals"><div><strong>${alertState === 'connected' ? raions.length : '—'}</strong><span>${alertState === 'connected' ? countForm(raions.length, 'район', 'райони', 'районів') : 'райони'} з тривогою</span></div><div><strong>${threatState === 'connected' ? threats.length : '—'}</strong><span>${threatState === 'connected' ? countForm(threats.length, 'об’єкт', 'об’єкти', 'об’єктів') : 'об’єкти'} загроз</span></div></div>
       ${oblastAlert && alertState === 'connected' ? `<div class="oblast-alert"><span class="district-dot ${oblastAlert.level === 'red' ? 'red' : 'yellow'}"></span><span>Тривога в усій області</span><small>${escapeHtml(alertLevelLabel(oblastAlert.level))}</small></div>` : ''}
@@ -248,22 +299,23 @@ function renderSelectedCard() {
   document.querySelector('.app').classList.add('has-region-panel');
 }
 
-function selectRegion(code, focus = false) {
-  if (selectedCode && regionLayers.has(selectedCode)) {
-    regionLayers.get(selectedCode).setStyle(provinceStyle(false));
-  }
+function selectRegion(code) {
+  if (code && !regionLayers.has(code)) return;
+  if (code && code === selectedCode) { fitSelectedRegion(); return; }
+  if (code && searchMarker) { map.removeLayer(searchMarker); searchMarker = null; }
   selectedCode = code;
-  if (code && regionLayers.has(code)) {
-    const layer = regionLayers.get(code);
-    layer.setStyle(provinceStyle(true));
-  }
+  document.querySelector('.app').classList.toggle('region-focus', Boolean(code));
+  updateRegionImagery();
+  updateProvinceFocus();
+  renderAlerts(lastAlertsData);
+  renderThreats(lastThreatsData);
   for (const [regionCode, marker] of labelMarkers) {
     marker.getElement()?.classList.toggle('selected', regionCode === code);
   }
   renderSelectedCard();
-  if (code && map.getSize().x > 900) fitOverview(true, true);
-  else if (code && focus && regionLayers.has(code)) map.flyToBounds(regionLayers.get(code).getBounds(), { padding: [95, 95], maxZoom: 7, duration: 0.55 });
+  if (code) fitSelectedRegion();
   layoutLabels();
+  settlementLayer?.clearLayers();
 }
 
 function layoutLabels() {
@@ -278,7 +330,8 @@ function layoutLabels() {
     const icon = labelMarkers.get(code)?.getElement();
     if (!icon) continue;
     icon.classList.remove('hidden');
-    const hiddenByScale = settlementNamesVisible || (zoom < 5.25 && rank > 0) ||
+    const hiddenByScale = (selectedCode && code !== selectedCode) ||
+      settlementNamesVisible || (zoom < 5.25 && rank > 0) ||
       (zoom < 5.85 && rank > 1);
     if (hiddenByScale) { icon.classList.add('hidden'); continue; }
     const rect = icon.querySelector('.capital-label-text')?.getBoundingClientRect();
@@ -294,7 +347,7 @@ function layoutLabels() {
   updateExternalLabels();
 }
 
-function addUkraineImagery(geometry) {
+function addUkraineImagery(geometry, pane = 'tilePane') {
   const polygons = geometry.type === 'MultiPolygon' ? geometry.coordinates : [geometry.coordinates];
   const project = ([lon, lat]) => {
     const sin = Math.max(-0.9999, Math.min(0.9999, Math.sin(lat * Math.PI / 180)));
@@ -346,10 +399,15 @@ function addUkraineImagery(geometry) {
       return canvas;
     }
   });
-  new UkraineTiles({ tileSize: 256, maxZoom: 19, attribution: IMAGERY_CREDIT }).addTo(map);
+  return new UkraineTiles({ pane, tileSize: 256, maxZoom: 19,
+    attribution: IMAGERY_CREDIT }).addTo(map);
 }
 
 function updateExternalLabels() {
+  if (selectedCode) {
+    for (const { marker } of externalRegionLabels) marker.getElement()?.classList.add('hidden');
+    return;
+  }
   const zoom = map.getZoom();
   const compact = window.innerWidth < 600;
   const eligible = [];
@@ -460,12 +518,14 @@ function addFlagFill() {
 }
 
 function renderAlerts(data) {
+  lastAlertsData = data;
   alertLayer.clearLayers();
   // updatedAt marks the last alert change, so an unchanged live snapshot can be older than a polling cycle.
   alertState = data && Array.isArray(data.raions) && Array.isArray(data.oblasts) &&
     Number.isFinite(Date.parse(data.updatedAt)) ? 'connected' : 'disconnected';
   activeRaions = [];
   activeOblasts = [];
+  const focusKey = selectedCode ? selectedRegionKey() : '';
   if (alertState === 'connected') {
     const seenOblasts = new Set();
     for (const oblast of data.oblasts) {
@@ -473,6 +533,7 @@ function renderAlerts(data) {
       if (!feature || seenOblasts.has(oblast.key)) continue;
       seenOblasts.add(oblast.key);
       activeOblasts.push(oblast);
+      if (focusKey && regionKey(oblast.oblast || oblast.name || oblast.key) !== focusKey) continue;
       L.geoJSON(feature, { pane: 'alerts', renderer: alertRenderer, interactive: false,
         style: alertStyle(oblast.level, true, oblast.oblast || oblast.name || oblast.key) }).addTo(alertLayer);
     }
@@ -482,6 +543,7 @@ function renderAlerts(data) {
       if (!feature || seenRaions.has(raion.key)) continue;
       seenRaions.add(raion.key);
       activeRaions.push(raion);
+      if (focusKey && regionKey(raion.oblast) !== focusKey) continue;
       L.geoJSON(feature, { pane: 'alerts', renderer: alertRenderer, interactive: false,
         style: alertStyle(raion.level, false, raion.oblast || raion.key) }).addTo(alertLayer);
     }
@@ -515,13 +577,16 @@ function threatIconHtml(kind, heading, advisory) {
 }
 
 function renderThreats(data) {
+  lastThreatsData = data;
   threatLayer.clearLayers();
   threatState = data && Array.isArray(data.threats) && isFresh(data.serverTime, 120000)
     ? 'connected' : data ? 'stale' : 'disconnected';
   activeThreats = threatState === 'connected'
     ? data.threats.filter(threat => threat.status === 'active' && isFresh(threat.updatedAt, 1800000))
     : [];
+  const focusKey = selectedCode ? selectedRegionKey() : '';
   for (const threat of activeThreats) {
+    if (focusKey && regionKey(threat.region) !== focusKey) continue;
     // Area-only coordinates are an oblast centroid, never a verified object position.
     if (threat.areaOnly || threat.lat == null || threat.lon == null ||
         !Number.isFinite(Number(threat.lat)) || !Number.isFinite(Number(threat.lon))) continue;
@@ -614,9 +679,11 @@ function updateSettlements() {
   const viewport = map.getSize();
   const occupied = [];
   let shown = 0;
+  const focusKey = selectedCode ? selectedRegionKey() : '';
   // The index is ordered by population: prominent settlements get priority when labels collide.
   for (const place of settlementPlaces) {
     if (place[3] < minimumPopulation || shown >= 220) break;
+    if (focusKey && regionKey(SETTLEMENT_REGIONS[place[4]]) !== focusKey) continue;
     if (!bounds.contains([place[1], place[2]])) continue;
     const point = map.latLngToContainerPoint([place[1], place[2]]);
     if (point.x < 0 || point.y < 0 || point.x > viewport.x || point.y > viewport.y) continue;
@@ -698,7 +765,7 @@ function chooseSearchResult(index) {
   if (searchMarker) { map.removeLayer(searchMarker); searchMarker = null; }
   if (item.type === 'region') {
     $('regionSearch').value = item.region.name;
-    selectRegion(item.region.code, true);
+    selectRegion(item.region.code);
   } else {
     const place = item.place;
     $('regionSearch').value = place[0];
@@ -783,12 +850,13 @@ async function init() {
     worldCopyJump: true
   });
   L.control.attribution({ prefix: false, position: 'bottomright' }).addTo(map);
-  for (const [name, zIndex] of [['externalRegions', 375], ['externalBorders', 385], ['externalLabels', 390], ['provinces', 410], ['alerts', 450], ['provinceOutlines', 460], ['countryBorder', 465], ['settlements', 630], ['labels', 650], ['threats', 670], ['searchPins', 710]]) {
+  for (const [name, zIndex] of [['externalRegions', 375], ['externalBorders', 385], ['externalLabels', 390], ['regionImagery', 405], ['provinces', 410], ['alerts', 450], ['provinceOutlines', 460], ['countryBorder', 465], ['settlements', 630], ['labels', 650], ['threats', 670], ['searchPins', 710]]) {
     map.createPane(name).style.zIndex = zIndex;
   }
   map.getPane('externalRegions').style.pointerEvents = 'none';
   map.getPane('externalBorders').style.pointerEvents = 'none';
   map.getPane('externalLabels').style.pointerEvents = 'none';
+  map.getPane('regionImagery').style.pointerEvents = 'none';
   map.getPane('provinceOutlines').style.pointerEvents = 'none';
   map.getPane('countryBorder').style.pointerEvents = 'none';
   map.getPane('labels').style.pointerEvents = 'none';
@@ -819,6 +887,7 @@ async function init() {
         const aliases = { UA01:'UA-43', UA44:'UA-09', UA73:'UA-77', UA80:'UA-30', UA85:'UA-40' };
         const code = aliases[pcode] || pcode.slice(0, 2) + '-' + pcode.slice(2);
         regionLayers.set(code, layer);
+        regionFeatures.set(code, feature);
         layer.on('click', () => selectRegion(code));
         layer.on('add', () => {
           const element = layer.getElement();
@@ -848,7 +917,8 @@ async function init() {
     fitOverview();
     window.addEventListener('resize', () => {
       map.invalidateSize();
-      fitOverview(Boolean(selectedCode));
+      if (selectedCode) fitSelectedRegion(false);
+      else fitOverview();
     });
     addLabels();
     addExternalRegions();

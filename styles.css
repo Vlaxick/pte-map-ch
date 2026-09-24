@@ -25,8 +25,20 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid #dfc8
 .leaflet-container{background:#10191c;font:inherit}
 .leaflet-pane path.leaflet-interactive:focus{outline:none}
 .leaflet-pane path.leaflet-interactive:focus-visible{stroke:#f1d698;stroke-width:2.5px}
-.leaflet-tile-pane{filter:brightness(.67) saturate(.78) contrast(1.24)}
-.map.dark-mode .leaflet-tile-pane{filter:brightness(.38) saturate(.35) contrast(1.18)}
+.leaflet-tile-pane,.leaflet-regionImagery-pane{filter:brightness(.67) saturate(.78) contrast(1.24)}
+.map.dark-mode .leaflet-tile-pane,.map.dark-mode .leaflet-regionImagery-pane{filter:brightness(.38) saturate(.35) contrast(1.18)}
+.leaflet-tile-pane,.leaflet-externalRegions-pane,.leaflet-externalBorders-pane,
+.leaflet-externalLabels-pane,.leaflet-countryBorder-pane,.leaflet-provinceOutlines-pane{
+  transition:opacity .46s ease;
+}
+.leaflet-provinces-pane path{transition:opacity .46s ease}
+.app.region-focus .leaflet-tile-pane,.app.region-focus .leaflet-externalRegions-pane,
+.app.region-focus .leaflet-externalBorders-pane,.app.region-focus .leaflet-externalLabels-pane,
+.app.region-focus .leaflet-countryBorder-pane,.app.region-focus .leaflet-provinceOutlines-pane,
+.app.region-focus .leaflet-provinces-pane path:not(.focused-province){opacity:0;pointer-events:none}
+.app.region-focus .leaflet-provinces-pane path.focused-province{
+  filter:drop-shadow(0 0 8px #dcc3899c);
+}
 .threat-marker{background:none;border:0}
 .threat-icon{
   position:relative;display:block;width:26px;height:26px;
@@ -62,6 +74,7 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid #dfc8
   border-radius:50%;background:#d9c797;vertical-align:1px;
 }
 .top-status.connected .status-dot{background:#d77f69}
+.app.region-focus .top-status{opacity:0;pointer-events:none;transition:opacity .26s ease}
 .right-actions{display:flex;flex-direction:column;align-items:stretch;gap:8px;width:370px;pointer-events:auto}
 .search-wrap{position:relative;z-index:2;width:100%}
 .toolbar-row{display:grid;grid-template-columns:44px 1fr 1fr;gap:8px}
@@ -167,6 +180,7 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid #dfc8
 }
 .region-card[hidden]{display:none}
 .region-card:not([hidden]){animation:region-panel-in .24s cubic-bezier(.2,.7,.2,1) both}
+.app.region-focus .region-card:not([hidden]){animation:region-panel-in .48s .24s cubic-bezier(.18,.72,.17,1) both}
 @keyframes region-panel-in{from{opacity:.75;transform:translateX(16px)}to{opacity:1;transform:translateX(0)}}
 .card-head{
   display:flex;align-items:center;gap:9px;flex:none;
@@ -215,6 +229,7 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid #dfc8
 .source-note a{color:#e5d49f;text-decoration:none}
 .source-note a:hover{text-decoration:underline}
 .source-note small{font:inherit;color:#b5c4c6}
+.app.region-focus .source-note{display:none}
 .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
 @media(max-width:1100px){
   .top-status{display:none}
@@ -222,6 +237,7 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid #dfc8
 @media(max-width:900px) and (min-width:601px){
   .region-card{top:auto;right:18px;bottom:18px;width:calc(100vw - 36px);max-height:min(56dvh,560px)}
   .app.has-region-panel .zoom-controls{right:18px;top:auto;bottom:calc(min(56dvh,560px) + 30px);transform:none}
+  .app.region-focus .zoom-controls{left:18px;right:auto;top:132px;bottom:auto}
   .app.has-region-panel .source-note{display:none}
 }
 @media(max-width:600px){
@@ -240,6 +256,7 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid #dfc8
   .capital-label-text{font-size:8px}
   .region-card{top:auto;right:10px;bottom:10px;width:calc(100vw - 20px);max-height:min(60dvh,560px)}
   .app.has-region-panel .zoom-controls{right:10px;bottom:calc(min(60dvh,560px) + 24px)}
+  .app.region-focus .zoom-controls{left:10px;right:auto;top:108px;bottom:auto}
   .app.has-region-panel .source-note{display:none}
   .source-note{left:10px;bottom:43px;max-width:calc(100vw - 75px);font-size:8px}
   .leaflet-control-attribution{max-width:95vw;font-size:8px!important}

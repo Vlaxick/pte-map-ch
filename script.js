@@ -179,6 +179,28 @@ function countForm(count, one, few, many) {
   return last === 1 ? one : last >= 2 && last <= 4 ? few : many;
 }
 
+function fitOverview(withPanel = false, animate = false) {
+  if (!map || !allBounds) return;
+  const compact = map.getSize().x < 600;
+  const panelOnRight = withPanel && map.getSize().x > 900;
+  const mapEdge = map.getContainer().getBoundingClientRect().right;
+  const panelEdge = $('regionCard').getBoundingClientRect().left;
+  const rightPadding = panelOnRight ? Math.ceil(mapEdge - panelEdge + 18) : compact ? 12 : 80;
+  const options = {
+    paddingTopLeft: compact ? [12, 74] : [80, 105],
+    paddingBottomRight: [rightPadding, compact ? 36 : 70],
+    maxZoom: compact ? 6 : 6.25
+  };
+  if (animate) map.flyToBounds(allBounds, { ...options, duration: 0.55 });
+  else map.fitBounds(allBounds, options);
+}
+
+function closeRegionPanel() {
+  if (!selectedCode) return;
+  selectRegion(null);
+  if (map.getSize().x > 900) fitOverview(false, true);
+}
+
 function renderSelectedCard() {
   const card = $('regionCard');
   const region = regionMeta.find(item => item.code === selectedCode);
@@ -221,7 +243,7 @@ function renderSelectedCard() {
       <p class="panel-caveat">Курс і місце можуть бути приблизними. Перевіряйте офіційні сигнали тривоги. <a href="https://neptun.in.ua/" target="_blank" rel="noopener noreferrer">Дані: NEPTUN ↗</a></p>
     </div>`;
   card.querySelector('.region-panel-body').scrollTop = scrollTop;
-  card.querySelector('.card-head button').onclick = () => selectRegion(null);
+  card.querySelector('.card-head button').onclick = closeRegionPanel;
   card.hidden = false;
   document.querySelector('.app').classList.add('has-region-panel');
 }
@@ -234,12 +256,13 @@ function selectRegion(code, focus = false) {
   if (code && regionLayers.has(code)) {
     const layer = regionLayers.get(code);
     layer.setStyle(provinceStyle(true));
-    if (focus) map.flyToBounds(layer.getBounds(), { padding: [95, 95], maxZoom: 7, duration: 0.55 });
   }
   for (const [regionCode, marker] of labelMarkers) {
     marker.getElement()?.classList.toggle('selected', regionCode === code);
   }
   renderSelectedCard();
+  if (code && map.getSize().x > 900) fitOverview(true, true);
+  else if (code && focus && regionLayers.has(code)) map.flyToBounds(regionLayers.get(code).getBounds(), { padding: [95, 95], maxZoom: 7, duration: 0.55 });
   layoutLabels();
 }
 
@@ -822,18 +845,10 @@ async function init() {
     threatLayer = L.layerGroup().addTo(map);
     settlementLayer = L.layerGroup().addTo(map);
     allBounds = L.geoJSON(country).getBounds();
-    const fitAll = () => {
-      const compact = map.getSize().x < 600;
-      map.fitBounds(allBounds, {
-        paddingTopLeft: compact ? [12, 74] : [80, 105],
-        paddingBottomRight: compact ? [12, 36] : [80, 70],
-        maxZoom: compact ? 6 : 6.25
-      });
-    };
-    fitAll();
+    fitOverview();
     window.addEventListener('resize', () => {
       map.invalidateSize();
-      if (!selectedCode) fitAll();
+      fitOverview(Boolean(selectedCode));
     });
     addLabels();
     addExternalRegions();
@@ -851,12 +866,12 @@ async function init() {
       $('regionSearch').value = '';
       hideSearchResults();
       if (searchMarker) { map.removeLayer(searchMarker); searchMarker = null; }
-      fitAll();
+      fitOverview();
     };
     setupSearch();
     setupHelp();
     document.addEventListener('keydown', event => {
-      if (event.key === 'Escape') selectRegion(null);
+      if (event.key === 'Escape') closeRegionPanel();
     });
     await refreshLiveData();
     setInterval(refreshLiveData, POLL_INTERVAL_MS);

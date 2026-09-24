@@ -34,28 +34,14 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid #dfc8
 }
 .threat-icon.has-heading::before{
   content:'';position:absolute;left:50%;top:-3px;width:2px;height:8px;
-  transform:translateX(-50%);border-radius:2px;background:#f5e8c7;
+  transform:translateX(-50%);border-radius:2px;background:#fff;
   box-shadow:0 0 3px #080b0ce0;
 }
-.threat-icon.advisory{opacity:.6}
 .threat-art,.threat-payload{
-  position:absolute;top:0;left:2px;display:block;width:22px;height:26px;
-  background:#f5e4c5;
-  /* XOR the source image's luminance with a solid mask: white becomes
-     transparent and the darker aircraft becomes the visible silhouette. */
-  -webkit-mask-image:linear-gradient(#fff,#fff),var(--art);
-  -webkit-mask-mode:alpha,luminance;
-  -webkit-mask-composite:xor;
-  -webkit-mask-size:100% 100%,100% 100%;
-  -webkit-mask-repeat:no-repeat;
-  mask-image:linear-gradient(#fff,#fff),var(--art);
-  mask-mode:alpha,luminance;
-  mask-composite:exclude;
-  mask-size:100% 100%,100% 100%;
-  mask-repeat:no-repeat;
+  position:absolute;inset:0;display:block;width:26px;height:26px;
+  object-fit:contain;pointer-events:none;
 }
-.threat-icon-orion .threat-art{width:18px;left:4px}
-.threat-payload{width:9px;height:11px;top:auto;left:auto;right:-2px;bottom:-2px;background:#e9aa82}
+.threat-payload{width:10px;height:11px;inset:auto -2px -2px auto}
 .leaflet-control-attribution{
   max-width:min(75vw,760px);
   padding:4px 8px!important;

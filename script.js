@@ -8,13 +8,13 @@ const NEPTUN_API = 'https://neptun.in.ua/api/v1';
 const POLL_INTERVAL_MS = 15000;
 const THREAT_ICON_SIZE = 26; // Roughly 20% smaller than the former 32px markers.
 const THREAT_ICONS = {
-  shahed: './assets/threats/shahed.png',
-  ballistic: './assets/threats/ballistic.png',
-  orion: './assets/threats/orion.png',
-  su35: './assets/threats/su35.png',
-  kab: './assets/threats/kab.png',
-  fpv: './assets/threats/fpv.png',
-  cruise: './assets/threats/cruise.png'
+  shahed: './assets/threat-icons/shahed.png',
+  ballistic: './assets/threat-icons/ballistic.png',
+  orion: './assets/threat-icons/orion.png',
+  su35: './assets/threat-icons/su35.png',
+  kab: './assets/threat-icons/kab.png',
+  fpv: './assets/threat-icons/fpv.png',
+  cruise: './assets/threat-icons/cruise.png'
 };
 const GEONAMES_CREDIT = '<a href="https://www.geonames.org/export/" target="_blank" rel="noopener noreferrer">Settlements: GeoNames CC BY</a>';
 const SETTLEMENT_REGIONS = {
@@ -442,8 +442,8 @@ function threatIconKind(threat) {
 function threatIconHtml(kind, heading, advisory) {
   const mainKind = kind === 'su35-kab' ? 'su35' : kind;
   const payload = kind === 'su35-kab'
-    ? `<span class="threat-payload" style="--art:url('${THREAT_ICONS.kab}')"></span>` : '';
-  return `<span class="threat-icon threat-icon-${mainKind}${advisory ? ' advisory' : ''}${heading == null ? '' : ' has-heading'}" style="--heading:${heading == null ? 0 : heading.toFixed(1)}deg"><span class="threat-art" style="--art:url('${THREAT_ICONS[mainKind]}')"></span>${payload}</span>`;
+    ? `<img class="threat-payload" src="${THREAT_ICONS.kab}" alt="">` : '';
+  return `<span class="threat-icon threat-icon-${mainKind}${advisory ? ' advisory' : ''}${heading == null ? '' : ' has-heading'}" style="--heading:${heading == null ? 0 : heading.toFixed(1)}deg"><img class="threat-art" src="${THREAT_ICONS[mainKind]}" alt="">${payload}</span>`;
 }
 
 function renderThreats(data) {

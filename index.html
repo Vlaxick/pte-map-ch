@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="./vendor/leaflet.css" />
-  <link rel="stylesheet" href="./styles.css?v=35" />
+  <link rel="stylesheet" href="./styles.css?v=38" />
 </head>
 <body>
   <main class="app">
@@ -32,13 +32,13 @@
     </header>
     <aside id="helpPanel" class="help-panel" hidden>
       <div class="help-head"><strong>Як читати карту</strong><button id="helpClose" aria-label="Закрити довідку">×</button></div>
-      <p>На огляді підписані обласні центри. При наближенні з’являються міста й села. Пошук знаходить також області.</p>
+      <p>Натисніть область, щоб побачити райони з тривогою та об’єкти загроз. При наближенні з’являються міста й села; їх можна знайти через пошук.</p>
       <div class="legend-row"><i class="legend-yellow"></i><span>Жовтий рівень тривоги</span></div>
       <div class="legend-row"><i class="legend-red"></i><span>Червоний рівень тривоги</span></div>
       <div class="legend-row"><i class="legend-flag"></i><span>Крим і Луганщина: кожен регіон синій зверху, жовтий знизу; червоний контур означає червоний рівень</span></div>
       <strong class="threat-legend-title">Позначки загроз</strong>
       <div class="threat-legend">
-        <span><span class="threat-icon"><img class="threat-art" src="./assets/threat-icons/shahed.png" alt=""></span>Ударний БпЛА</span>
+        <span><span class="threat-icon"><img class="threat-art" src="./assets/threat-icons/shahed.png?v=2" alt=""></span>Ударний БпЛА</span>
         <span><span class="threat-icon"><img class="threat-art" src="./assets/threat-icons/ballistic.png" alt=""></span>Балістика</span>
         <span><span class="threat-icon"><img class="threat-art" src="./assets/threat-icons/orion.png" alt=""></span>Розвід БпЛА</span>
         <span><span class="threat-icon"><img class="threat-art" src="./assets/threat-icons/fpv.png" alt=""></span>FPV-дрон</span>
@@ -49,10 +49,10 @@
       <p class="help-muted">Модель літака показується лише коли її названо в повідомленні. Місце може бути приблизним; курс показано лише за свіжими даними.</p>
     </aside>
     <div class="zoom-controls"><button id="zoomIn" aria-label="Наблизити">+</button><button id="zoomOut" aria-label="Віддалити">−</button></div>
-    <section id="regionCard" class="region-card" aria-live="polite" hidden></section>
+    <aside id="regionCard" class="region-card" aria-labelledby="regionPanelTitle" hidden></aside>
     <div class="source-note"><a href="https://neptun.in.ua/" target="_blank" rel="noopener noreferrer">Дані про тривоги й загрози: NEPTUN ↗</a><span id="sourceStatus">Підключення до даних…</span><small>Інформаційна карта. Перевіряйте офіційні сигнали тривоги.</small></div>
   </main>
   <script src="./vendor/leaflet.js"></script>
-  <script src="./script.js?v=37"></script>
+  <script src="./script.js?v=41"></script>
 </body>
 </html>

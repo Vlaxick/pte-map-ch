@@ -8,7 +8,7 @@ const NEPTUN_API = 'https://neptun.in.ua/api/v1';
 const POLL_INTERVAL_MS = 15000;
 const THREAT_ICON_SIZE = 26; // Roughly 20% smaller than the former 32px markers.
 const THREAT_ICONS = {
-  shahed: './assets/threat-icons/shahed.png',
+  shahed: './assets/threat-icons/shahed.png?v=2',
   ballistic: './assets/threat-icons/ballistic.png',
   orion: './assets/threat-icons/orion.png',
   su35: './assets/threat-icons/su35.png',
@@ -133,8 +133,9 @@ function setMapStyle(style) {
 }
 
 function regionKey(value) {
-  return String(value || '').toLocaleLowerCase('uk').replace(/\s+область$/, '')
+  const key = String(value || '').toLocaleLowerCase('uk').replace(/\s+область$/, '')
     .replace(/^м\.\s*/, '').trim();
+  return /^(?:ар крим|автономна республіка крим|кримська)$/.test(key) ? 'крим' : key;
 }
 
 function isFresh(value, maxAgeMs) {
@@ -155,30 +156,74 @@ function setStatus() {
     : message.toLocaleLowerCase('uk');
 }
 
+function freshThreatHeading(threat) {
+  if (threat.areaOnly || !isFresh(threat.updatedAt, 600000)) return null;
+  const raw = threat.heading == null ? NaN : Number(threat.heading);
+  return Number.isFinite(raw) ? ((raw % 360) + 360) % 360 : null;
+}
+
+function directionText(heading) {
+  const directions = ['північ', 'північний схід', 'схід', 'південний схід',
+    'південь', 'південний захід', 'захід', 'північний захід'];
+  return `${directions[Math.round(heading / 45) % 8]} · ${Math.round(heading)}°`;
+}
+
+function alertLevelLabel(level) {
+  return level === 'red' ? 'Червоний рівень' : level === 'yellow' ? 'Жовтий рівень' : 'Тривога';
+}
+
+function countForm(count, one, few, many) {
+  const lastTwo = count % 100;
+  if (lastTwo >= 11 && lastTwo <= 14) return many;
+  const last = count % 10;
+  return last === 1 ? one : last >= 2 && last <= 4 ? few : many;
+}
+
 function renderSelectedCard() {
   const card = $('regionCard');
   const region = regionMeta.find(item => item.code === selectedCode);
   if (!region) {
     card.hidden = true;
+    document.querySelector('.app').classList.remove('has-region-panel');
     return;
   }
   const key = regionKey(region.name);
-  const activeNames = activeRaions
+  const raions = activeRaions
     .filter(raion => regionKey(raion.oblast) === key)
-    .map(raion => raion.name);
+    .sort((a, b) => String(a.name).localeCompare(String(b.name), 'uk'));
   const oblastAlert = activeOblasts.find(oblast => regionKey(oblast.oblast || oblast.name) === key);
-  const threatCount = activeThreats.filter(threat => regionKey(threat.region) === key).length;
-  const message = alertState !== 'connected'
-    ? 'Свіжі дані про тривоги зараз недоступні.'
-    : [oblastAlert ? `Тривога в області (${oblastAlert.level === 'red' ? 'червоний' : 'жовтий'} рівень).` : '',
-      activeNames.length ? `Райони з тривогою: ${activeNames.join(', ')}.` : '',
-      threatState === 'connected' && threatCount ? `Повідомлень про загрози в регіоні: ${threatCount}.` : '']
-      .filter(Boolean).join(' ') || 'Активних тривог за даними Neptun немає.';
-  card.innerHTML = `<div class="card-head"><span>РЕГІОН / ${escapeHtml(selectedCode)}</span><button aria-label="Закрити">×</button></div>
-    <h2>${escapeHtml(region.name)}</h2>
-    <p>${escapeHtml(message)}</p>`;
-  card.querySelector('button').onclick = () => selectRegion(null);
+  const threats = activeThreats.filter(threat => regionKey(threat.region) === key)
+    .sort((a, b) => Number(Boolean(a.advisory)) - Number(Boolean(b.advisory)));
+  const scrollTop = card.querySelector('.region-panel-body')?.scrollTop || 0;
+  const districtContent = alertState !== 'connected'
+    ? '<p class="panel-empty">Дані про тривоги зараз недоступні.</p>'
+    : raions.length
+      ? `<ul class="panel-list">${raions.map(raion => `<li class="district-item"><span class="district-dot ${raion.level === 'red' ? 'red' : 'yellow'}"></span><span class="district-name">${escapeHtml(raion.name)}</span><span class="district-level">${escapeHtml(alertLevelLabel(raion.level))}</span></li>`).join('')}</ul>`
+      : `<p class="panel-empty">${oblastAlert ? 'Тривога оголошена для всієї області; районів окремо не вказано.' : 'Активних районних тривог немає.'}</p>`;
+  const threatContent = threatState !== 'connected'
+    ? '<p class="panel-empty">Дані про об’єкти зараз недоступні.</p>'
+    : threats.length
+      ? `<ul class="panel-list threat-list">${threats.map(threat => {
+        const heading = freshThreatHeading(threat);
+        const kind = threatIconKind(threat);
+        const icon = kind === 'su35-kab' ? 'su35' : kind;
+        const place = threat.areaOnly ? 'Місце в області не уточнене' :
+          [threat.district, threat.locality].filter(Boolean).join(' · ') || 'Місце не уточнене';
+        return `<li class="panel-threat"><span class="panel-threat-symbol" aria-hidden="true">${icon ? `<img src="${THREAT_ICONS[icon]}" alt="">` : '●'}</span><div class="panel-threat-details"><strong>${escapeHtml(threat.title || 'Об’єкт загрози')}</strong><span>${escapeHtml(place)}</span><span class="panel-course">${heading == null ? 'Напрямок не вказано' : `Напрямок: ${escapeHtml(directionText(heading))}`}</span></div>${threat.advisory ? '<span class="panel-advisory">Спостереження</span>' : ''}</li>`;
+      }).join('')}</ul>`
+      : '<p class="panel-empty">Об’єктів загроз у цій області зараз немає.</p>';
+  card.innerHTML = `<div class="card-head"><span>ОБЛАСТЬ / ${escapeHtml(selectedCode)}</span><a href="https://neptun.in.ua/" target="_blank" rel="noopener noreferrer">ДАНІ: NEPTUN ↗</a><button type="button" aria-label="Закрити панель області">×</button></div>
+    <div class="region-panel-body"><h2 id="regionPanelTitle">${escapeHtml(region.name)}</h2>
+      <div class="panel-totals"><div><strong>${alertState === 'connected' ? raions.length : '—'}</strong><span>${alertState === 'connected' ? countForm(raions.length, 'район', 'райони', 'районів') : 'райони'} з тривогою</span></div><div><strong>${threatState === 'connected' ? threats.length : '—'}</strong><span>${threatState === 'connected' ? countForm(threats.length, 'об’єкт', 'об’єкти', 'об’єктів') : 'об’єкти'} загроз</span></div></div>
+      ${oblastAlert && alertState === 'connected' ? `<div class="oblast-alert"><span class="district-dot ${oblastAlert.level === 'red' ? 'red' : 'yellow'}"></span><span>Тривога в усій області</span><small>${escapeHtml(alertLevelLabel(oblastAlert.level))}</small></div>` : ''}
+      <section class="panel-section"><div class="panel-section-head"><h3>Райони з тривогою</h3><span>${alertState === 'connected' ? raions.length : '—'}</span></div>${districtContent}</section>
+      <section class="panel-section"><div class="panel-section-head"><h3>Об’єкти загроз</h3><span>${threatState === 'connected' ? threats.length : '—'}</span></div>${threatContent}</section>
+      <p class="panel-caveat">Курс і місце можуть бути приблизними. Перевіряйте офіційні сигнали тривоги. <a href="https://neptun.in.ua/" target="_blank" rel="noopener noreferrer">Дані: NEPTUN ↗</a></p>
+    </div>`;
+  card.querySelector('.region-panel-body').scrollTop = scrollTop;
+  card.querySelector('.card-head button').onclick = () => selectRegion(null);
   card.hidden = false;
+  document.querySelector('.app').classList.add('has-region-panel');
 }
 
 function selectRegion(code, focus = false) {
@@ -443,7 +488,7 @@ function threatIconHtml(kind, heading, advisory) {
   const mainKind = kind === 'su35-kab' ? 'su35' : kind;
   const payload = kind === 'su35-kab'
     ? `<img class="threat-payload" src="${THREAT_ICONS.kab}" alt="">` : '';
-  return `<span class="threat-icon threat-icon-${mainKind}${advisory ? ' advisory' : ''}${heading == null ? '' : ' has-heading'}" style="--heading:${heading == null ? 0 : heading.toFixed(1)}deg"><img class="threat-art" src="${THREAT_ICONS[mainKind]}" alt="">${payload}</span>`;
+  return `<span class="threat-icon threat-icon-${mainKind}${advisory ? ' advisory' : ''}" style="--heading:${heading == null ? 0 : heading.toFixed(1)}deg"><img class="threat-art" src="${THREAT_ICONS[mainKind]}" alt="">${payload}</span>`;
 }
 
 function renderThreats(data) {
@@ -459,9 +504,7 @@ function renderThreats(data) {
         !Number.isFinite(Number(threat.lat)) || !Number.isFinite(Number(threat.lon))) continue;
     const approximate = threat.positionQuality !== 'precise' || Number(threat.uncertaintyKm) > 0;
     const advisory = threat.advisory === true;
-    const rawHeading = threat.heading == null ? NaN : Number(threat.heading);
-    const heading = Number.isFinite(rawHeading) && isFresh(threat.updatedAt, 600000)
-      ? ((rawHeading % 360) + 360) % 360 : null;
+    const heading = freshThreatHeading(threat);
     const color = advisory ? '#9ab5c0' : threat.type === 'ballistic' || threat.type === 'missile'
       ? '#fa8180' : '#f1c980';
     const iconKind = threatIconKind(threat);

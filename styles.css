@@ -27,15 +27,28 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid #dfc8
 .leaflet-pane path.leaflet-interactive:focus-visible{stroke:#f1d698;stroke-width:2.5px}
 .leaflet-tile-pane,.leaflet-regionImagery-pane{filter:brightness(.67) saturate(.78) contrast(1.24)}
 .map.dark-mode .leaflet-tile-pane,.map.dark-mode .leaflet-regionImagery-pane{filter:brightness(.38) saturate(.35) contrast(1.18)}
-.leaflet-tile-pane,.leaflet-externalRegions-pane,.leaflet-externalBorders-pane,
-.leaflet-externalLabels-pane,.leaflet-countryBorder-pane,.leaflet-provinceOutlines-pane{
+.leaflet-tile-pane,.leaflet-regionImagery-pane,.leaflet-externalRegions-pane,
+.leaflet-externalBorders-pane,.leaflet-externalLabels-pane,.leaflet-countryBorder-pane,
+.leaflet-provinceOutlines-pane,.leaflet-districtOutlines-pane{
   transition:opacity .46s ease;
 }
 .leaflet-provinces-pane path{transition:opacity .46s ease}
-.app.region-focus .leaflet-tile-pane,.app.region-focus .leaflet-externalRegions-pane,
-.app.region-focus .leaflet-externalBorders-pane,.app.region-focus .leaflet-externalLabels-pane,
-.app.region-focus .leaflet-countryBorder-pane,.app.region-focus .leaflet-provinceOutlines-pane,
-.app.region-focus .leaflet-provinces-pane path:not(.focused-province){opacity:0;pointer-events:none}
+.leaflet-regionImagery-pane,.leaflet-districtOutlines-pane{opacity:0}
+.app.region-focus-ready .leaflet-regionImagery-pane,
+.app.region-focus .leaflet-districtOutlines-pane{opacity:1}
+.app.region-focus-ready .leaflet-tile-pane,
+.app.region-focus-ready .leaflet-externalRegions-pane,
+.app.region-focus-ready .leaflet-externalBorders-pane,
+.app.region-focus-ready .leaflet-countryBorder-pane,
+.app.region-focus-ready .leaflet-provinceOutlines-pane{opacity:.17;pointer-events:none}
+.app.region-focus-ready .leaflet-externalLabels-pane{opacity:.12;pointer-events:none}
+.app.region-focus-ready .leaflet-provinces-pane path:not(.focused-province){opacity:.17;pointer-events:none}
+.app.region-focus .leaflet-provinces-pane path:not(.focused-province){pointer-events:none}
+.leaflet-alerts-pane path,.leaflet-threats-pane .leaflet-marker-icon,
+.leaflet-threats-pane path{transition:opacity .25s ease}
+.leaflet-alerts-pane .focus-hidden,.leaflet-threats-pane .focus-hidden{
+  opacity:0;pointer-events:none
+}
 .app.region-focus .leaflet-provinces-pane path.focused-province{
   filter:drop-shadow(0 0 8px #dcc3899c);
 }

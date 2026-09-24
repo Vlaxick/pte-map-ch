@@ -103,20 +103,20 @@ function provinceStyle(selected = false) {
   if (mapStyle === 'dark') {
     return {
       pane: 'provinces',
-      color: selected ? '#f0c78b' : '#657980',
+      color: selected ? '#8dd6df' : '#657980',
       weight: selected ? (selectedCode ? 3 : 2.3) : 0.7,
       opacity: selected ? 1 : 0.4,
-      fillColor: selected ? '#79674d' : '#1c2c39',
-      fillOpacity: selected ? 0.6 : 0.83
+      fillColor: selected ? '#315867' : '#1c2c39',
+      fillOpacity: selected ? 0.42 : 0.83
     };
   }
   return {
     pane: 'provinces',
-    color: selected ? '#dac995' : '#80918e',
+    color: selected ? '#8dd6df' : '#80918e',
     weight: selected ? (selectedCode ? 3 : 2) : 0.7,
     opacity: selected ? 0.95 : 0.4,
-    fillColor: selected ? '#d6b778' : '#c5d9cc',
-    fillOpacity: selected ? 0.2 : 0.035
+    fillColor: selected ? '#478f9e' : '#c5d9cc',
+    fillOpacity: selected ? 0.09 : 0.035
   };
 }
 

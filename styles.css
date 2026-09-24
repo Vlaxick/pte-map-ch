@@ -50,7 +50,7 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid #dfc8
   opacity:0;pointer-events:none
 }
 .app.region-focus .leaflet-provinces-pane path.focused-province{
-  filter:drop-shadow(0 0 8px #dcc3899c);
+  filter:drop-shadow(0 0 8px #72c4d69c);
 }
 .threat-marker{background:none;border:0}
 .threat-icon{

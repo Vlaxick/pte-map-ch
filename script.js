@@ -5,7 +5,11 @@ const OCHA_CREDIT = '<a href="https://gis.unocha.org/server/rest/services/Hosted
 const EXTERNAL_COUNTRIES = ['RUS', 'BLR', 'POL', 'SVK', 'HUN', 'ROU', 'MDA'];
 const EXTERNAL_CREDIT = '<a href="https://www.geoboundaries.org/" target="_blank" rel="noopener noreferrer">External regions: geoBoundaries gbOpen</a>';
 const NEPTUN_API = 'https://neptun.in.ua/api/v1';
+const NEPTUN_STREAM = 'wss://neptun.in.ua/api/v1/stream';
 const POLL_INTERVAL_MS = 15000;
+const MOTION_INTERVAL_MS = 160;
+const MOTION_MAX_AGE_MS = 120000;
+const MOTION_MAX_DISTANCE_KM = 2;
 const THREAT_ICON_SIZE = 26; // Roughly 20% smaller than the former 32px markers.
 const THREAT_ICONS = {
   shahed: './assets/threat-icons/shahed.png?v=2',
@@ -76,6 +80,13 @@ let alertRenderer;
 let alertVisuals = [];
 let threatLayer;
 let threatVisuals = [];
+let lastThreatSignature = '';
+let realtimeSocket;
+let realtimeConnected = false;
+let lastStreamMessageMs = 0;
+let reconnectTimer;
+let reconnectDelayMs = 1000;
+let streamThreatsById = new Map();
 let countryBorderLayer;
 let provinceBorderLayer;
 let externalRegionLabels = [];
@@ -219,7 +230,9 @@ function setStatus() {
   status.innerHTML = '<span class="status-dot"></span> ' +
     message;
   $('sourceStatus').textContent = alertState === 'connected'
-    ? threatState === 'connected' ? 'Дані оновлюються' : 'Тривоги оновлюються · загрози недоступні'
+    ? threatState === 'connected'
+      ? realtimeConnected ? 'Живий потік · дані NEPTUN' : 'Оновлення через резервний запит'
+      : 'Тривоги оновлюються · загрози недоступні'
     : message.toLocaleLowerCase('uk');
 }
 
@@ -227,6 +240,38 @@ function freshThreatHeading(threat) {
   if (threat.areaOnly || !isFresh(threat.updatedAt, 600000)) return null;
   const raw = threat.heading == null ? NaN : Number(threat.heading);
   return Number.isFinite(raw) ? ((raw % 360) + 360) % 360 : null;
+}
+
+function motionPosition(threat, observedAtMs, nowMs) {
+  const lat = Number(threat.lat);
+  const lon = Number(threat.lon);
+  const heading = freshThreatHeading(threat);
+  if (threat.areaOnly || !Number.isFinite(lat) || !Number.isFinite(lon) || heading == null ||
+      !['uav', 'recon'].includes(threat.type) || !isFresh(threat.updatedAt, 360000)) {
+    return null;
+  }
+  const elapsed = Math.min(Math.max(nowMs - observedAtMs, 0), MOTION_MAX_AGE_MS);
+  const reportedUncertainty = Number(threat.uncertaintyKm);
+  const capKm = Math.min(MOTION_MAX_DISTANCE_KM,
+    Number.isFinite(reportedUncertainty) && reportedUncertainty > 0 ? reportedUncertainty / 2 : 1);
+  const reportedSpeed = Number(threat.velocity?.speedKmh);
+  // Without measured speed this is a slow display drift, not a claim about actual flight speed.
+  const displaySpeedKmh = Number.isFinite(reportedSpeed) && reportedSpeed > 0
+    ? Math.min(reportedSpeed, 180) : 60;
+  const distanceKm = Math.min(capKm, displaySpeedKmh * elapsed / 3600000);
+  const radians = heading * Math.PI / 180;
+  return [lat + distanceKm * Math.cos(radians) / 111.32,
+    lon + distanceKm * Math.sin(radians) / (111.32 * Math.cos(lat * Math.PI / 180))];
+}
+
+function animateThreatMarkers() {
+  if (document.hidden) return;
+  const now = Date.now();
+  for (const item of threatVisuals) {
+    if (!item.motion) continue;
+    const point = motionPosition(item.threat, item.observedAtMs, now);
+    if (point) item.layer.setLatLng(point);
+  }
 }
 
 function directionText(heading) {
@@ -354,7 +399,7 @@ function renderSelectedCard() {
       ${oblastAlert && alertState === 'connected' ? `<div class="oblast-alert"><span class="district-dot ${oblastAlert.level === 'red' ? 'red' : 'yellow'}"></span><span>Тривога в усій області</span><small>${escapeHtml(alertLevelLabel(oblastAlert.level))}</small></div>` : ''}
       <section class="panel-section"><div class="panel-section-head"><h3>Райони з тривогою</h3><span>${alertState === 'connected' ? raions.length : '—'}</span></div>${districtContent}</section>
       <section class="panel-section"><div class="panel-section-head"><h3>Об’єкти загроз</h3><span>${threatState === 'connected' ? threats.length : '—'}</span></div>${threatContent}</section>
-      <p class="panel-caveat">Курс і місце можуть бути приблизними. Перевіряйте офіційні сигнали тривоги. <a href="https://neptun.in.ua/" target="_blank" rel="noopener noreferrer">Дані: NEPTUN ↗</a></p>
+      <p class="panel-caveat">Значки БпЛА можуть плавно зсуватися до 2 км за курсом — це візуальна оцінка, а не нове спостереження. Перевіряйте офіційні сигнали тривоги. <a href="https://neptun.in.ua/" target="_blank" rel="noopener noreferrer">Дані: NEPTUN ↗</a></p>
     </div>`;
   if (panelHtml !== lastPanelHtml) {
     card.innerHTML = panelHtml;
@@ -660,13 +705,20 @@ function threatIconHtml(kind, heading, advisory) {
 }
 
 function renderThreats(data) {
-  threatLayer.clearLayers();
-  threatVisuals = [];
-  threatState = data && Array.isArray(data.threats) && isFresh(data.serverTime, 120000)
+  const nextState = data && Array.isArray(data.threats) && isFresh(data.serverTime, 120000)
     ? 'connected' : data ? 'stale' : 'disconnected';
-  activeThreats = threatState === 'connected'
+  const nextThreats = nextState === 'connected'
     ? data.threats.filter(threat => threat.status === 'active' && isFresh(threat.updatedAt, 1800000))
     : [];
+  const signature = JSON.stringify([nextState, nextThreats]);
+  if (signature === lastThreatSignature) return;
+  const previousMotion = new Map(threatVisuals.filter(item => item.threat.id)
+    .map(item => [item.threat.id, item]));
+  lastThreatSignature = signature;
+  threatState = nextState;
+  activeThreats = nextThreats;
+  threatLayer.clearLayers();
+  threatVisuals = [];
   for (const threat of activeThreats) {
     // Area-only coordinates are an oblast centroid, never a verified object position.
     if (threat.areaOnly || threat.lat == null || threat.lon == null ||
@@ -674,11 +726,18 @@ function renderThreats(data) {
     const approximate = threat.positionQuality !== 'precise' || Number(threat.uncertaintyKm) > 0;
     const advisory = threat.advisory === true;
     const heading = freshThreatHeading(threat);
+    const previous = previousMotion.get(threat.id);
+    const samePosition = previous && previous.threat.lat === threat.lat &&
+      previous.threat.lon === threat.lon && previous.threat.heading === threat.heading &&
+      previous.threat.updatedAt === threat.updatedAt;
+    const observedAtMs = samePosition ? previous.observedAtMs : Date.now();
+    const predictedPosition = motionPosition(threat, observedAtMs, Date.now());
+    const initialPosition = predictedPosition || [Number(threat.lat), Number(threat.lon)];
     const color = advisory ? '#9ab5c0' : threat.type === 'ballistic' || threat.type === 'missile'
       ? '#fa8180' : '#f1c980';
     const iconKind = threatIconKind(threat);
     const marker = iconKind
-      ? L.marker([Number(threat.lat), Number(threat.lon)], {
+      ? L.marker(initialPosition, {
         pane: 'threats', title: `${threat.title || 'Загроза'}${heading == null ? '' : ` · орієнтовний курс ${Math.round(heading)}°`}`,
         icon: L.divIcon({
           className: 'threat-marker', iconSize: [THREAT_ICON_SIZE, THREAT_ICON_SIZE],
@@ -686,7 +745,7 @@ function renderThreats(data) {
           html: threatIconHtml(iconKind, heading, advisory)
         })
       }).addTo(threatLayer)
-      : L.circleMarker([Number(threat.lat), Number(threat.lon)], {
+      : L.circleMarker(initialPosition, {
         pane: 'threats', radius: advisory ? 4 : 5.5, color, weight: 2,
         fillColor: color, fillOpacity: advisory ? 0.36 : 0.65,
         dashArray: approximate ? '3 3' : undefined
@@ -696,8 +755,10 @@ function renderThreats(data) {
       ? ` · похибка до ${escapeHtml(threat.uncertaintyKm)} км` : '';
     const category = advisory ? 'Спостереження' : 'Загроза';
     const course = heading == null ? '' : `<br><small>Орієнтовний курс: ${Math.round(heading)}° від півночі</small>`;
-    marker.bindPopup(`<strong>${escapeHtml(threat.title || category)}</strong><br>${category} · ${quality}${uncertainty}${course}<br>${escapeHtml(threat.region || '')}<br><small>Джерело: NEPTUN · ${escapeHtml(threat.updatedAt || '')}</small>`);
-    threatVisuals.push({ layer: marker, key: regionKey(threat.region) });
+    const motion = predictedPosition !== null;
+    const motionNote = motion ? '<br><small>Рух значка — обмежена візуальна оцінка за курсом, не нове спостереження.</small>' : '';
+    marker.bindPopup(`<strong>${escapeHtml(threat.title || category)}</strong><br>${category} · ${quality}${uncertainty}${course}${motionNote}<br>${escapeHtml(threat.region || '')}<br><small>Джерело: NEPTUN · ${escapeHtml(threat.updatedAt || '')}</small>`);
+    threatVisuals.push({ layer: marker, key: regionKey(threat.region), threat, observedAtMs, motion });
   }
   updateFocusOverlays();
   setStatus();
@@ -721,13 +782,70 @@ async function refreshLiveData() {
   refreshInFlight = true;
   try {
     const [alerts, threats] = await Promise.allSettled([getNeptun('alerts'), getNeptun('threats')]);
+    if (realtimeConnected) return;
     renderAlerts(alerts.status === 'fulfilled' ? alerts.value : null);
-    renderThreats(threats.status === 'fulfilled' ? threats.value : null);
+    const threatSnapshot = threats.status === 'fulfilled' ? threats.value : null;
+    renderThreats(threatSnapshot);
+    if (threatSnapshot && Array.isArray(threatSnapshot.threats)) {
+      streamThreatsById = new Map(threatSnapshot.threats.filter(threat => threat.id)
+        .map(threat => [threat.id, threat]));
+    }
     if (alerts.status === 'rejected') console.warn('Neptun alerts unavailable', alerts.reason);
     if (threats.status === 'rejected') console.warn('Neptun threats unavailable', threats.reason);
   } finally {
     refreshInFlight = false;
   }
+}
+
+function renderStreamThreats(timestamp) {
+  renderThreats({ serverTime: timestamp, threats: [...streamThreatsById.values()] });
+}
+
+function handleStreamMessage(raw) {
+  let envelope;
+  try { envelope = JSON.parse(raw); } catch { return; }
+  if (!envelope || typeof envelope.type !== 'string') return;
+  lastStreamMessageMs = Date.now();
+  const data = envelope.data;
+  const timestamp = Number.isFinite(Date.parse(envelope.ts))
+    ? envelope.ts : new Date().toISOString();
+  if (envelope.type === 'snapshot' && data && Array.isArray(data.threats)) {
+    streamThreatsById = new Map(data.threats.filter(threat => threat.id)
+      .map(threat => [threat.id, threat]));
+    renderStreamThreats(timestamp);
+  } else if (envelope.type === 'upsert' && data?.id) {
+    streamThreatsById.set(data.id, data);
+    renderStreamThreats(timestamp);
+  } else if (envelope.type === 'remove' && data?.id) {
+    streamThreatsById.delete(data.id);
+    renderStreamThreats(timestamp);
+  } else if (envelope.type === 'alerts' && data &&
+      Array.isArray(data.raions) && Array.isArray(data.oblasts)) {
+    renderAlerts({ ...data, updatedAt: data.updatedAt || timestamp });
+  }
+}
+
+function connectRealtimeStream() {
+  if (!window.WebSocket || realtimeSocket) return;
+  const socket = new WebSocket(NEPTUN_STREAM);
+  realtimeSocket = socket;
+  socket.onopen = () => {
+    realtimeConnected = true;
+    lastStreamMessageMs = Date.now();
+    reconnectDelayMs = 1000;
+    setStatus();
+  };
+  socket.onmessage = event => handleStreamMessage(event.data);
+  socket.onerror = () => socket.close();
+  socket.onclose = () => {
+    if (realtimeSocket !== socket) return;
+    realtimeSocket = null;
+    realtimeConnected = false;
+    setStatus();
+    clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(connectRealtimeStream, reconnectDelayMs);
+    reconnectDelayMs = Math.min(reconnectDelayMs * 2, 30000);
+  };
 }
 
 function addLabels() {
@@ -1041,7 +1159,14 @@ async function init() {
       if (event.key === 'Escape') closeRegionPanel();
     });
     await refreshLiveData();
-    setInterval(refreshLiveData, POLL_INTERVAL_MS);
+    connectRealtimeStream();
+    setInterval(() => {
+      if (!realtimeConnected || Date.now() - lastStreamMessageMs > 45000) {
+        if (realtimeSocket && Date.now() - lastStreamMessageMs > 45000) realtimeSocket.close();
+        refreshLiveData();
+      }
+    }, POLL_INTERVAL_MS);
+    setInterval(animateThreatMarkers, MOTION_INTERVAL_MS);
   } catch (error) {
     $('topStatus').textContent = 'Не вдалося завантажити межі карти';
     $('sourceStatus').textContent = 'Перевірте локальний сервер і файли геоданих';

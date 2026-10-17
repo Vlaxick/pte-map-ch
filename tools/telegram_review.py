@@ -1,6 +1,6 @@
-"""Local public-channel collection and human review of regional civil warnings.
+"""Local collection, regional civil warning bulletins, and exception review.
 
-No target extraction, geocoding, track matching, or automatic map-state updates.
+No target extraction, geocoding, track matching, or automatic alert-color changes.
 Only Telegram's public web preview is read; no account session is required.
 """
 
@@ -75,6 +75,44 @@ def classify(text):
     if clear and announcement:
         return "uncertain", regions, "У дописі поєднано оголошення та відбій."
     return ("clear" if clear else "alert"), regions, "Попередня категорія за явним текстом; потрібна перевірка."
+
+
+def route_message(text, published_at, received_at):
+    """Auto-publish only short, standalone regional civil warning announcements."""
+    category, regions, _ = classify(text)
+    if category == "other":
+        return "archive", "Сторонній допис: збережений без завдання на перевірку."
+    try:
+        published = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
+        received = datetime.fromisoformat(received_at.replace("Z", "+00:00"))
+        if published.tzinfo is None or received.tzinfo is None:
+            raise ValueError("Missing timezone")
+        age = (received - published).total_seconds()
+    except (ValueError, TypeError, AttributeError):
+        return "review", "Некоректний час публікації; автоматична обробка зупинена."
+    if age > 600:
+        return "archive", "Допис старший за 10 хвилин на момент отримання; лише історія."
+    if age < -60:
+        return "review", "Час публікації в майбутньому."
+    if category not in {"alert", "clear"} or len(regions) != 1:
+        return "review", "Зміст або область потребує уточнення."
+    name = regions[0]
+    aliases = REGIONS[name]
+    scopes = []
+    for index, alias in enumerate(aliases):
+        suffix = r"[а-яіїєґ]*\s+област[а-яіїєґ]*" if index == 0 and name not in {"Київ", "Севастополь", "АР Крим"} else r"[а-яіїєґ]*"
+        scopes.append(re.escape(alias) + suffix)
+    scope = "(?:" + "|".join(scopes) + ")"
+    announcement = (r"(?:(?:оголошено|оголошена|розпочалася)\s+)?повітрян(?:а|у)\s+тривог(?:а|у)"
+                    if category == "alert" else r"відбій\s+повітряної\s+тривоги")
+    # Remove decorative punctuation/emojis, but leave all words: quotes, conditional
+    # reports, district-only notices, and extra commentary cannot match this grammar.
+    clean = re.sub(r"[^а-яіїєґa-z0-9\s'-]", " ", text.lower().replace("–", "-").replace("—", "-"))
+    clean = re.sub(r"\s+", " ", clean).strip()
+    grammar = rf"(?:{scope}\s+{announcement}|{announcement}\s+(?:(?:у|в|на|для)\s+)?{scope})"
+    if len(text) <= 240 and re.fullmatch(grammar, clean):
+        return "automatic", "Автоматично: окреме свіже повідомлення про тривогу або відбій для однієї області."
+    return "review", "Текст виходить за однозначний шаблон; потрібна перевірка."
 
 
 class PreviewParser(HTMLParser):
@@ -157,6 +195,7 @@ class ReviewStore:
             raise ValueError("Некоректний список Telegram каналів.")
         self.lock = threading.Lock()
         self.stop_event = threading.Event()
+        self.collector_running = False
         with self.connect() as db:
             db.executescript("""
                 PRAGMA journal_mode=WAL;
@@ -176,6 +215,17 @@ class ReviewStore:
                     channel TEXT PRIMARY KEY, last_attempt TEXT, last_success TEXT,
                     error TEXT, message_count INTEGER DEFAULT 0);
             """)
+
+            columns = {r["name"] for r in db.execute("PRAGMA table_info(messages)")}
+            for column in ["routing", "routing_reason"]:
+                if column not in columns:
+                    db.execute(f"ALTER TABLE messages ADD COLUMN {column} TEXT")
+            for row in db.execute("SELECT * FROM messages WHERE routing IS NULL").fetchall():
+                route, reason = route_message(row["text"], row["published_at"], row["first_seen_at"])
+                if row["reviewed_at"]:
+                    route, reason = ("review" if row["review_state"] == "pending" else "manual"), "Збережене рішення користувача."
+                db.execute("UPDATE messages SET routing=?,routing_reason=? WHERE channel=? AND id=?",
+                           (route, reason, row["channel"], row["id"]))
 
     @contextmanager
     def connect(self):
@@ -209,6 +259,9 @@ class ReviewStore:
                     review_state='pending',reviewed_at=NULL,note=''""", values)
                 db.execute("INSERT INTO revisions VALUES(?,?,?,?,?,?,?)", (channel, message["id"], revision,
                            message["text"], message["publishedAt"], received_at, digest))
+                route, routing_reason = route_message(message["text"], message["publishedAt"], received_at)
+                db.execute("UPDATE messages SET routing=?,routing_reason=? WHERE channel=? AND id=?",
+                           (route, routing_reason, channel, message["id"]))
                 changed += 1
         return changed
 
@@ -239,17 +292,23 @@ class ReviewStore:
 
     def start(self):
         def worker():
-            while not self.stop_event.is_set():
-                self.poll()
-                self.stop_event.wait(self.interval)
+            try:
+                while not self.stop_event.is_set():
+                    self.poll()
+                    self.stop_event.wait(self.interval)
+            finally:
+                self.collector_running = False
+        self.collector_running = True
         threading.Thread(target=worker, daemon=True, name="telegram-review").start()
 
     def status(self):
         with self.connect() as db:
             statuses = {r["channel"]: dict(r) for r in db.execute("SELECT * FROM source_status")}
             counts = {r["review_state"]: r["total"] for r in db.execute("SELECT review_state,COUNT(*) total FROM messages GROUP BY review_state")}
-        return {"sources": [{**s, **statuses.get(s["username"], {}), "url": "https://t.me/" + s["username"]} for s in self.sources],
-                "counts": counts, "regions": list(REGIONS), "collecting": self.lock.locked(), "pollIntervalSeconds": self.interval,
+            routing_counts = {r["routing"]: r["total"] for r in db.execute("SELECT routing,COUNT(*) total FROM messages GROUP BY routing")}
+        return {"routingCounts": routing_counts, "sources": [{**s, **statuses.get(s["username"], {}), "url": "https://t.me/" + s["username"]} for s in self.sources],
+                "counts": counts, "regions": list(REGIONS), "collecting": self.lock.locked(), "collectorRunning": self.collector_running, "pollIntervalSeconds": self.interval,
+                "automation": "Тривога й відбій для однієї області — у зведення автоматично; неясні дописи — на перевірку; інші — в архів. Кольори тривог на карті залишаються даними NEPTUN.",
                 "coverage": "Вебперегляд містить лише останні доступні дописи. Історія та видалення можуть бути неповними."}
 
     @staticmethod
@@ -259,9 +318,9 @@ class ReviewStore:
         item["url"] = "https://t.me/{}/{}".format(item["channel"], item["id"])
         return item
 
-    def messages(self, state="", source="", query=""):
+    def messages(self, state="", source="", query="", routing=""):
         conditions, args = [], []
-        for field, value in [("review_state", state), ("channel", source)]:
+        for field, value in [("review_state", state), ("channel", source), ("routing", routing)]:
             if value:
                 conditions.append(field + "=?")
                 args.append(value)
@@ -273,6 +332,21 @@ class ReviewStore:
             total = db.execute("SELECT COUNT(*) FROM messages" + where, args).fetchone()[0]
             rows = db.execute("SELECT * FROM messages" + where + " ORDER BY published_at DESC,id DESC LIMIT 150", args).fetchall()
         return {"messages": [self.serialize(r) for r in rows], "total": total}
+
+    def bulletins(self):
+        """Recent source announcements, not an inferred current all-clear state."""
+        with self.connect() as db:
+            rows = db.execute("""SELECT * FROM messages WHERE
+                (routing='automatic' AND review_state='pending' OR review_state='approved')
+                AND category IN ('alert','clear') AND julianday(published_at) >= julianday('now','-6 hours')
+                AND julianday(published_at) <= julianday('now','+1 minute')
+                ORDER BY julianday(published_at) DESC,id DESC LIMIT 100""").fetchall()
+        items = []
+        for row in rows:
+            item = self.serialize(row)
+            items.append({k: item[k] for k in ["channel", "id", "revision", "category", "regions", "published_at", "url", "routing"]})
+        return {"bulletins": items, "status": self.status(), "windowHours": 6,
+                "meaning": "Історія повідомлень каналів за 6 годин, не поточний офіційний стан тривоги."}
 
     def detail(self, channel, message_id):
         with self.connect() as db:
@@ -300,5 +374,7 @@ class ReviewStore:
                 WHERE channel=? AND id=? AND revision=?""", (state, category, json.dumps(regions, ensure_ascii=False), note, now, channel, message_id, data.get("revision")))
             if cursor.rowcount != 1:
                 raise RuntimeError("Допис змінився. Оновіть його та перевірте нову версію.")
+            db.execute("UPDATE messages SET routing=?,routing_reason=? WHERE channel=? AND id=?",
+                       ("review" if state == "pending" else "manual", "Рішення користувача.", channel, message_id))
             db.execute("INSERT INTO review_events(channel,message_id,revision,created_at,state,category,regions,note) VALUES(?,?,?,?,?,?,?,?)",
                        (channel, message_id, data["revision"], now, state, category, json.dumps(regions, ensure_ascii=False), note))

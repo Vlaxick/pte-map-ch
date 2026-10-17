@@ -24,7 +24,7 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid #dfc8
 .app.startup-error .zoom-controls{display:none}
 .leaflet-container{background:#10191c;font:inherit}
 .leaflet-pane path.leaflet-interactive:focus{outline:none}
-.leaflet-pane path.leaflet-interactive:focus-visible{stroke:#f1d698;stroke-width:2.5px}
+.leaflet-pane path.leaflet-interactive:focus-visible{stroke:#8dd6df;stroke-width:3px}
 .leaflet-tile-pane,.leaflet-regionImagery-pane{filter:brightness(.67) saturate(.78) contrast(1.24)}
 .map.dark-mode .leaflet-tile-pane,.map.dark-mode .leaflet-regionImagery-pane{filter:brightness(.38) saturate(.35) contrast(1.18)}
 .leaflet-tile-pane,.leaflet-regionImagery-pane,.leaflet-externalRegions-pane,
@@ -277,3 +277,7 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid #dfc8
   .leaflet-control-attribution{max-width:95vw;font-size:8px!important}
 }
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{transition-duration:.01ms!important;animation-duration:.01ms!important}}
+
+.civil-bulletin{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 0;font-size:11px}
+.civil-bulletin div{display:grid;gap:6px}.civil-bulletin span{color:#a6babb;font-size:10px}
+.civil-bulletin a,.bulletin-journal{color:#a9dade;font-size:10px;overflow-wrap:anywhere}

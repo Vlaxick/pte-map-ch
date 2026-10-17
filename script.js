@@ -7,9 +7,6 @@ const EXTERNAL_CREDIT = '<a href="https://www.geoboundaries.org/" target="_blank
 const NEPTUN_API = 'https://neptun.in.ua/api/v1';
 const NEPTUN_STREAM = 'wss://neptun.in.ua/api/v1/stream';
 const POLL_INTERVAL_MS = 15000;
-const MOTION_INTERVAL_MS = 160;
-const MOTION_MAX_AGE_MS = 120000;
-const MOTION_MAX_DISTANCE_KM = 2;
 const THREAT_ICON_SIZE = 26; // Roughly 20% smaller than the former 32px markers.
 const THREAT_ICONS = {
   shahed: './assets/threat-icons/shahed.png?v=2',
@@ -81,6 +78,13 @@ let alertVisuals = [];
 let threatLayer;
 let threatVisuals = [];
 let lastThreatSignature = '';
+let lastAlertSignature = '';
+let mapMoving = false;
+let pendingThreatData;
+let pendingAlertData;
+let overlayFlushFrame = 0;
+const settlementMarkers = new Map();
+const imageryImages = new Map();
 let realtimeSocket;
 let realtimeConnected = false;
 let lastStreamMessageMs = 0;
@@ -97,6 +101,10 @@ let activeOblasts = [];
 let activeThreats = [];
 let threatState = 'disconnected';
 let lastPanelHtml = '';
+let civilBulletins = [];
+let civilBulletinStatus = null;
+let civilBulletinSignature = '';
+let bulletinRequestInFlight = false;
 let refreshInFlight = false;
 let settlementPlaces = [];
 let settlementLayer;
@@ -242,36 +250,23 @@ function freshThreatHeading(threat) {
   return Number.isFinite(raw) ? ((raw % 360) + 360) % 360 : null;
 }
 
-function motionPosition(threat, observedAtMs, nowMs) {
-  const lat = Number(threat.lat);
-  const lon = Number(threat.lon);
-  const heading = freshThreatHeading(threat);
-  if (threat.areaOnly || !Number.isFinite(lat) || !Number.isFinite(lon) || heading == null ||
-      !['uav', 'recon'].includes(threat.type) || !isFresh(threat.updatedAt, 360000)) {
-    return null;
-  }
-  const elapsed = Math.min(Math.max(nowMs - observedAtMs, 0), MOTION_MAX_AGE_MS);
-  const reportedUncertainty = Number(threat.uncertaintyKm);
-  const capKm = Math.min(MOTION_MAX_DISTANCE_KM,
-    Number.isFinite(reportedUncertainty) && reportedUncertainty > 0 ? reportedUncertainty / 2 : 1);
-  const reportedSpeed = Number(threat.velocity?.speedKmh);
-  // Without measured speed this is a slow display drift, not a claim about actual flight speed.
-  const displaySpeedKmh = Number.isFinite(reportedSpeed) && reportedSpeed > 0
-    ? Math.min(reportedSpeed, 180) : 60;
-  const distanceKm = Math.min(capKm, displaySpeedKmh * elapsed / 3600000);
-  const radians = heading * Math.PI / 180;
-  return [lat + distanceKm * Math.cos(radians) / 111.32,
-    lon + distanceKm * Math.sin(radians) / (111.32 * Math.cos(lat * Math.PI / 180))];
-}
-
-function animateThreatMarkers() {
-  if (document.hidden) return;
-  const now = Date.now();
-  for (const item of threatVisuals) {
-    if (!item.motion) continue;
-    const point = motionPosition(item.threat, item.observedAtMs, now);
-    if (point) item.layer.setLatLng(point);
-  }
+// Leaflet owns marker transforms throughout a pan/zoom. Apply only the newest
+// received snapshot after navigation; never race its animation with position writes.
+function flushMapUpdates() {
+  if (mapMoving || overlayFlushFrame) return;
+  overlayFlushFrame = requestAnimationFrame(() => {
+    overlayFlushFrame = 0;
+    if (mapMoving) return;
+    if (pendingAlertData !== undefined) {
+      const data = pendingAlertData; pendingAlertData = undefined; renderAlerts(data);
+    }
+    if (pendingThreatData !== undefined) {
+      const data = pendingThreatData; pendingThreatData = undefined; renderThreats(data);
+    }
+    scheduleLabelLayout();
+    scheduleSettlements();
+    renderSelectedCard();
+  });
 }
 
 function directionText(heading) {
@@ -357,6 +352,40 @@ function closeRegionPanel() {
   fitOverview(true);
 }
 
+async function loadCivilBulletins() {
+  if (bulletinRequestInFlight || document.hidden) return;
+  bulletinRequestInFlight = true;
+  try {
+    const response = await fetch('/api/review/bulletins', { cache: 'no-store', signal: AbortSignal.timeout(10000) });
+    if (!response.ok || !response.headers.get('content-type')?.includes('application/json')) throw new Error('Bulletins unavailable');
+    const data = await response.json();
+    civilBulletins = data.bulletins;
+    civilBulletinStatus = data.status;
+  } catch {
+    civilBulletinStatus = null;
+    civilBulletins = [];
+  } finally {
+    bulletinRequestInFlight = false;
+    const signature = JSON.stringify([civilBulletins, civilBulletinStatus?.sources]);
+    if (signature !== civilBulletinSignature) {
+      civilBulletinSignature = signature;
+      if (!mapMoving) renderSelectedCard();
+    }
+  }
+}
+
+function civilBulletinContent(key) {
+  if (!civilBulletinStatus) return '<p class="panel-empty">Зведення каналів недоступне. Перевірте локальний сервер.</p>';
+  const reports = civilBulletins.filter(item => item.regions.some(region => regionKey(region) === key)).slice(0, 5);
+  const unavailable = civilBulletinStatus.sources.filter(source => source.error || !isFresh(source.last_success, civilBulletinStatus.pollIntervalSeconds * 3000)).length;
+  return `<p class="panel-empty">Автоматичні повідомлення за 6 годин${unavailable ? ` · недоступних джерел: ${unavailable}` : ''}. Це історія дописів, не поточний офіційний стан.</p>` +
+    (reports.length ? `<ul class="panel-list">${reports.map(item => {
+      const time = new Date(item.published_at).toLocaleTimeString('uk-UA', { timeZone: 'Europe/Kyiv', hour: '2-digit', minute: '2-digit' });
+      return `<li class="civil-bulletin"><div><strong>${item.category === 'clear' ? 'Повідомлення про відбій' : 'Повідомлення про тривогу'}</strong><span>${time} · ${item.routing === 'automatic' ? 'автоматично' : 'перевірено'}</span></div><a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">@${escapeHtml(item.channel)} ↗</a></li>`;
+    }).join('')}</ul>` : '<p class="panel-empty">Свіжих однозначних повідомлень для цієї області немає.</p>') +
+    '<a class="bulletin-journal" href="./review.html">Журнал і стан джерел ↗</a>';
+}
+
 function renderSelectedCard() {
   const card = $('regionCard');
   const region = regionMeta.find(item => item.code === selectedCode);
@@ -399,7 +428,8 @@ function renderSelectedCard() {
       ${oblastAlert && alertState === 'connected' ? `<div class="oblast-alert"><span class="district-dot ${oblastAlert.level === 'red' ? 'red' : 'yellow'}"></span><span>Тривога в усій області</span><small>${escapeHtml(alertLevelLabel(oblastAlert.level))}</small></div>` : ''}
       <section class="panel-section"><div class="panel-section-head"><h3>Райони з тривогою</h3><span>${alertState === 'connected' ? raions.length : '—'}</span></div>${districtContent}</section>
       <section class="panel-section"><div class="panel-section-head"><h3>Об’єкти загроз</h3><span>${threatState === 'connected' ? threats.length : '—'}</span></div>${threatContent}</section>
-      <p class="panel-caveat">Значки БпЛА можуть плавно зсуватися до 2 км за курсом — це візуальна оцінка, а не нове спостереження. Перевіряйте офіційні сигнали тривоги. <a href="https://neptun.in.ua/" target="_blank" rel="noopener noreferrer">Дані: NEPTUN ↗</a></p>
+      <section class="panel-section"><div class="panel-section-head"><h3>Повідомлення каналів</h3></div>${civilBulletinContent(key)}</section>
+      <p class="panel-caveat">Значки показують останню отриману позицію. Час і приблизність місця доступні при натисканні. Перевіряйте офіційні сигнали тривоги. <a href="https://neptun.in.ua/" target="_blank" rel="noopener noreferrer">Дані: NEPTUN ↗</a></p>
     </div>`;
   if (panelHtml !== lastPanelHtml) {
     card.innerHTML = panelHtml;
@@ -433,44 +463,69 @@ function selectRegion(code) {
     fitSelectedRegion();
   }
   layoutLabels();
-  settlementLayer?.clearLayers();
+  scheduleSettlements();
+}
+
+function labelBox(marker, external = false) {
+  const element = marker.getElement();
+  if (!element) return null;
+  const point = map.latLngToContainerPoint(marker.getLatLng());
+  // Labels use a fixed monospace face; calculate bounds without forcing DOM layout.
+  const fontSize = external || window.innerWidth < 600 ? 8 : 9;
+  const width = element.textContent.length * fontSize * 0.63 + 5;
+  const left = point.x + (external ? -width / 2 : 5);
+  return { left, right: left + width, top: point.y - 7, bottom: point.y + 7 };
+}
+
+function labelFits(box, occupied, viewport) {
+  return box && box.right >= 0 && box.left <= viewport.x && box.bottom >= 0 && box.top <= viewport.y &&
+    !occupied.some(other => box.left < other.right + 6 && box.right > other.left - 6 &&
+      box.top < other.bottom + 4 && box.bottom > other.top - 4);
 }
 
 function layoutLabels() {
-  if (!map || !labelMarkers.size) return;
+  if (!map || !labelMarkers.size || mapMoving) return;
   const zoom = map.getZoom();
   const settlementNamesVisible = zoom >= 7 && settlementPlaces.length > 0;
   const occupied = [];
-  const viewport = map.getContainer().getBoundingClientRect();
+  const viewport = map.getSize();
   const ordered = [...CAPITALS].sort((a, b) =>
     (a[0] === selectedCode ? -1 : a[4]) - (b[0] === selectedCode ? -1 : b[4]));
   for (const [code, , , , rank] of ordered) {
-    const icon = labelMarkers.get(code)?.getElement();
+    const marker = labelMarkers.get(code);
+    const icon = marker?.getElement();
     if (!icon) continue;
-    icon.classList.remove('hidden');
-    const hiddenByScale = (selectedCode && code !== selectedCode) ||
-      settlementNamesVisible || (zoom < 5.25 && rank > 0) ||
-      (zoom < 5.85 && rank > 1);
-    if (hiddenByScale) { icon.classList.add('hidden'); continue; }
-    const rect = icon.querySelector('.capital-label-text')?.getBoundingClientRect();
-    if (!rect || rect.right < viewport.left || rect.left > viewport.right ||
-        rect.bottom < viewport.top || rect.top > viewport.bottom) continue;
-    if (occupied.some(other => rect.left < other.right + 6 && rect.right > other.left - 6 &&
-        rect.top < other.bottom + 4 && rect.bottom > other.top - 4)) {
-      icon.classList.add('hidden');
-    } else {
-      occupied.push(rect);
-    }
+    const hiddenByScale = (selectedCode && code !== selectedCode) || settlementNamesVisible ||
+      (zoom < 5.25 && rank > 0) || (zoom < 5.85 && rank > 1);
+    const box = hiddenByScale ? null : labelBox(marker);
+    const show = !hiddenByScale && labelFits(box, occupied, viewport);
+    icon.classList.toggle('hidden', !show);
+    if (show) occupied.push(box);
   }
-  updateExternalLabels();
+  updateExternalLabels(occupied);
 }
 
 function scheduleLabelLayout() {
   if (labelLayoutFrame) return;
   labelLayoutFrame = requestAnimationFrame(() => {
     labelLayoutFrame = 0;
-    layoutLabels();
+    if (!mapMoving) layoutLabels();
   });
+}
+
+function loadImageryImage(url) {
+  if (imageryImages.has(url)) return imageryImages.get(url);
+  const promise = new Promise((resolve, reject) => {
+    const image = new Image();
+    image.crossOrigin = 'anonymous';
+    image.onload = () => resolve(image);
+    image.onerror = () => { imageryImages.delete(url); reject(new Error('Satellite tile unavailable')); };
+    image.src = url;
+  });
+  imageryImages.set(url, promise);
+  // 96 decoded 256px tiles use roughly 24 MiB; bound memory for long sessions.
+  if (imageryImages.size > 96) imageryImages.delete(imageryImages.keys().next().value);
+  return promise;
 }
 
 function addUkraineImagery(geometry, pane = 'tilePane') {
@@ -485,6 +540,11 @@ function addUkraineImagery(geometry, pane = 'tilePane') {
     const ys = rings[0].map(point => point[1]);
     return { rings, bounds: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)] };
   });
+  const clip = new Path2D();
+  for (const { rings } of shapes) for (const ring of rings) {
+    ring.forEach(([x, y], i) => i ? clip.lineTo(x, y) : clip.moveTo(x, y));
+    clip.closePath();
+  }
   const UkraineTiles = L.GridLayer.extend({
     createTile(coords, done) {
       const scale = 2 ** coords.z;
@@ -501,28 +561,15 @@ function addUkraineImagery(geometry, pane = 'tilePane') {
       }
       const canvas = document.createElement('canvas');
       canvas.width = canvas.height = 256;
-      const image = new Image();
-      image.crossOrigin = 'anonymous';
-      image.onload = () => {
+      const url = IMAGERY.replace('{z}', coords.z).replace('{y}', coords.y).replace('{x}', tileX);
+      loadImageryImage(url).then(image => {
         const context = canvas.getContext('2d');
-        context.beginPath();
-        for (const { rings } of nearby) {
-          for (const ring of rings) {
-            ring.forEach(([x, y], index) => {
-              const px = x * scale - tileX * 256;
-              const py = y * scale - coords.y * 256;
-              if (index === 0) context.moveTo(px, py);
-              else context.lineTo(px, py);
-            });
-            context.closePath();
-          }
-        }
-        context.clip('evenodd');
+        context.setTransform(scale, 0, 0, scale, -tileX * 256, -coords.y * 256);
+        context.clip(clip, 'evenodd');
+        context.setTransform(1, 0, 0, 1, 0, 0);
         context.drawImage(image, 0, 0, 256, 256);
         done(null, canvas);
-      };
-      image.onerror = () => done(new Error('Satellite tile unavailable'), canvas);
-      image.src = IMAGERY.replace('{z}', coords.z).replace('{y}', coords.y).replace('{x}', tileX);
+      }, error => done(error, canvas));
       return canvas;
     }
   });
@@ -531,42 +578,21 @@ function addUkraineImagery(geometry, pane = 'tilePane') {
     attribution: IMAGERY_CREDIT }).addTo(map);
 }
 
-function updateExternalLabels() {
-  if (selectedCode) {
-    for (const { marker } of externalRegionLabels) marker.getElement()?.classList.add('hidden');
-    return;
-  }
+function updateExternalLabels(occupied = []) {
+  if (mapMoving) return;
   const zoom = map.getZoom();
   const compact = window.innerWidth < 600;
-  const eligible = [];
-  for (const item of externalRegionLabels) {
-    const { marker, country, priority } = item;
-    const show = country === 'RUS'
-      ? zoom >= (compact ? 7.25 : 6.75) || (priority && zoom >= 4.65)
-      : zoom >= 4.65;
-    marker.getElement()?.classList.toggle('hidden', !show);
-    if (show) eligible.push(item);
-  }
-  const viewport = map.getContainer().getBoundingClientRect();
-  const occupied = [...labelMarkers.values()].flatMap(marker => {
-    const icon = marker.getElement();
-    if (!icon || icon.classList.contains('hidden')) return [];
-    const rect = icon.querySelector('.capital-label-text')?.getBoundingClientRect();
-    return rect && rect.right >= viewport.left && rect.left <= viewport.right &&
-      rect.bottom >= viewport.top && rect.top <= viewport.bottom ? [rect] : [];
-  });
-  // Keep labels legible when several small border regions meet on screen.
-  for (const { marker } of eligible.sort((a, b) =>
+  const viewport = map.getSize();
+  const ordered = [...externalRegionLabels].sort((a, b) =>
     (a.country === 'MDA' ? -1 : a.country === 'RUS' ? 1 : 0) -
-    (b.country === 'MDA' ? -1 : b.country === 'RUS' ? 1 : 0))) {
-    const element = marker.getElement();
-    const rect = element?.querySelector('.external-label-text')?.getBoundingClientRect();
-    if (!rect || rect.right < viewport.left || rect.left > viewport.right ||
-        rect.bottom < viewport.top || rect.top > viewport.bottom) continue;
-    const overlaps = occupied.some(other => rect.left < other.right + 5 &&
-      rect.right > other.left - 5 && rect.top < other.bottom + 3 && rect.bottom > other.top - 3);
-    if (overlaps) element.classList.add('hidden');
-    else occupied.push(rect);
+    (b.country === 'MDA' ? -1 : b.country === 'RUS' ? 1 : 0));
+  for (const { marker, country, priority } of ordered) {
+    const eligible = !selectedCode && (country === 'RUS'
+      ? zoom >= (compact ? 7.25 : 6.75) || (priority && zoom >= 4.65) : zoom >= 4.65);
+    const box = eligible ? labelBox(marker, true) : null;
+    const show = eligible && labelFits(box, occupied, viewport);
+    marker.getElement()?.classList.toggle('hidden', !show);
+    if (show) occupied.push(box);
   }
 }
 
@@ -579,16 +605,18 @@ async function addExternalRegions() {
       if (responses.some(response => !response.ok)) throw new Error(`External boundaries unavailable: ${country}`);
       return Promise.all(responses.map(response => response.json()));
     }));
+    const regionRenderer = L.canvas({ pane: 'externalRegions', padding: 0.3 });
+    const borderRenderer = L.canvas({ pane: 'externalBorders', padding: 0.3 });
     for (const [index, [outline, regions]] of collections.entries()) {
       const country = EXTERNAL_COUNTRIES[index];
       if (regions) {
         L.geoJSON(regions, {
-          pane: 'externalRegions', interactive: false,
+          pane: 'externalRegions', renderer: regionRenderer, interactive: false, smoothFactor: 1.5,
           style: { color: '#60777b', weight: 0.8, opacity: 0.5, fill: false }
         }).addTo(map);
       }
       L.geoJSON(outline, {
-        pane: 'externalBorders', interactive: false,
+        pane: 'externalBorders', renderer: borderRenderer, interactive: false, smoothFactor: 1.5,
         style: { color: '#91a6a3', weight: 1.45, opacity: 0.8, fill: false }
       }).addTo(map);
       const labelFeatures = country === 'MDA' ? outline.features : regions?.features || [];
@@ -646,35 +674,48 @@ function addFlagFill() {
 }
 
 function renderAlerts(data) {
-  alertLayer.clearLayers();
-  alertVisuals = [];
-  // updatedAt marks the last alert change, so an unchanged live snapshot can be older than a polling cycle.
+  if (mapMoving) { pendingAlertData = data; return; }
+  // updatedAt is the last state change, not the freshness of this snapshot.
   alertState = data && Array.isArray(data.raions) && Array.isArray(data.oblasts) &&
     Number.isFinite(Date.parse(data.updatedAt)) ? 'connected' : 'disconnected';
-  activeRaions = [];
-  activeOblasts = [];
+  activeRaions = []; activeOblasts = [];
+  const wanted = new Map();
   if (alertState === 'connected') {
-    const seenOblasts = new Set();
-    for (const oblast of data.oblasts) {
-      const feature = alertOblastsByKey.get(regionKey(oblast.key));
-      if (!feature || seenOblasts.has(oblast.key)) continue;
-      seenOblasts.add(oblast.key);
-      activeOblasts.push(oblast);
-      const layer = L.geoJSON(feature, { pane: 'alerts', renderer: alertRenderer, interactive: false,
-        style: alertStyle(oblast.level, true, oblast.oblast || oblast.name || oblast.key) }).addTo(alertLayer);
-      alertVisuals.push({ layer, key: regionKey(oblast.oblast || oblast.name || oblast.key) });
-    }
-    const seenRaions = new Set();
-    for (const raion of data.raions) {
-      const feature = alertRaionsByKey.get(regionKey(raion.key));
-      if (!feature || seenRaions.has(raion.key)) continue;
-      seenRaions.add(raion.key);
-      activeRaions.push(raion);
-      const layer = L.geoJSON(feature, { pane: 'alerts', renderer: alertRenderer, interactive: false,
-        style: alertStyle(raion.level, false, raion.oblast || raion.key) }).addTo(alertLayer);
-      alertVisuals.push({ layer, key: regionKey(raion.oblast) });
+    for (const [kind, records, features, active] of [
+      ['oblast', data.oblasts, alertOblastsByKey, activeOblasts],
+      ['raion', data.raions, alertRaionsByKey, activeRaions]
+    ]) {
+      for (const record of records) {
+        const feature = features.get(regionKey(record.key));
+        const id = kind + ':' + regionKey(record.key);
+        if (!feature || wanted.has(id)) continue;
+        active.push(record);
+        wanted.set(id, { feature, record, oblast: kind === 'oblast',
+          key: regionKey(record.oblast || (kind === 'oblast' ? record.name || record.key : '')) });
+      }
     }
   }
+  const signature = JSON.stringify([alertState, activeOblasts, activeRaions]);
+  if (signature === lastAlertSignature) return;
+  lastAlertSignature = signature;
+  const previous = new Map(alertVisuals.map(item => [item.id, item]));
+  const next = [];
+  for (const [id, item] of wanted) {
+    const style = alertStyle(item.record.level, item.oblast, item.key);
+    const styleSignature = JSON.stringify(style);
+    let visual = previous.get(id);
+    if (visual) {
+      previous.delete(id);
+      if (visual.styleSignature !== styleSignature) visual.layer.setStyle(style);
+    } else {
+      visual = { id, layer: L.geoJSON(item.feature, { pane: 'alerts', renderer: alertRenderer,
+        interactive: false, style }).addTo(alertLayer) };
+    }
+    Object.assign(visual, { key: item.key, styleSignature });
+    next.push(visual);
+  }
+  for (const item of previous.values()) alertLayer.removeLayer(item.layer);
+  alertVisuals = next;
   addFlagFill();
   updateFocusOverlays();
   setStatus();
@@ -705,61 +746,69 @@ function threatIconHtml(kind, heading, advisory) {
 }
 
 function renderThreats(data) {
+  if (mapMoving) { pendingThreatData = data; return; }
   const nextState = data && Array.isArray(data.threats) && isFresh(data.serverTime, 120000)
     ? 'connected' : data ? 'stale' : 'disconnected';
   const nextThreats = nextState === 'connected'
-    ? data.threats.filter(threat => threat.status === 'active' && isFresh(threat.updatedAt, 1800000))
-    : [];
+    ? data.threats.filter(threat => threat.status === 'active' && isFresh(threat.updatedAt, 1800000)) : [];
   const signature = JSON.stringify([nextState, nextThreats]);
   if (signature === lastThreatSignature) return;
-  const previousMotion = new Map(threatVisuals.filter(item => item.threat.id)
-    .map(item => [item.threat.id, item]));
   lastThreatSignature = signature;
   threatState = nextState;
   activeThreats = nextThreats;
-  threatLayer.clearLayers();
-  threatVisuals = [];
+  const previous = new Map(threatVisuals.map(item => [item.id, item]));
+  const next = [];
+  const seen = new Set();
   for (const threat of activeThreats) {
-    // Area-only coordinates are an oblast centroid, never a verified object position.
     if (threat.areaOnly || threat.lat == null || threat.lon == null ||
         !Number.isFinite(Number(threat.lat)) || !Number.isFinite(Number(threat.lon))) continue;
+    const id = threat.id != null ? String(threat.id) :
+      JSON.stringify([threat.type, threat.title, threat.lat, threat.lon]);
+    if (seen.has(id)) continue;
+    seen.add(id);
     const approximate = threat.positionQuality !== 'precise' || Number(threat.uncertaintyKm) > 0;
     const advisory = threat.advisory === true;
     const heading = freshThreatHeading(threat);
-    const previous = previousMotion.get(threat.id);
-    const samePosition = previous && previous.threat.lat === threat.lat &&
-      previous.threat.lon === threat.lon && previous.threat.heading === threat.heading &&
-      previous.threat.updatedAt === threat.updatedAt;
-    const observedAtMs = samePosition ? previous.observedAtMs : Date.now();
-    const predictedPosition = motionPosition(threat, observedAtMs, Date.now());
-    const initialPosition = predictedPosition || [Number(threat.lat), Number(threat.lon)];
-    const color = advisory ? '#9ab5c0' : threat.type === 'ballistic' || threat.type === 'missile'
-      ? '#fa8180' : '#f1c980';
-    const iconKind = threatIconKind(threat);
-    const marker = iconKind
-      ? L.marker(initialPosition, {
-        pane: 'threats', title: `${threat.title || 'Загроза'}${heading == null ? '' : ` · орієнтовний курс ${Math.round(heading)}°`}`,
-        icon: L.divIcon({
-          className: 'threat-marker', iconSize: [THREAT_ICON_SIZE, THREAT_ICON_SIZE],
-          iconAnchor: [THREAT_ICON_SIZE / 2, THREAT_ICON_SIZE / 2],
-          html: threatIconHtml(iconKind, heading, advisory)
-        })
-      }).addTo(threatLayer)
-      : L.circleMarker(initialPosition, {
-        pane: 'threats', radius: advisory ? 4 : 5.5, color, weight: 2,
-        fillColor: color, fillOpacity: advisory ? 0.36 : 0.65,
-        dashArray: approximate ? '3 3' : undefined
-      }).addTo(threatLayer);
+    const color = advisory ? '#9ab5c0' : threat.type === 'ballistic' || threat.type === 'missile' ? '#fa8180' : '#f1c980';
+    const kind = threatIconKind(threat);
+    const iconSignature = JSON.stringify([kind, heading, advisory, approximate, color]);
+    const title = `${threat.title || 'Загроза'}${heading == null ? '' : ` · орієнтовний курс ${Math.round(heading)}°`}`;
+    const icon = () => L.divIcon({ className: 'threat-marker',
+      iconSize: [THREAT_ICON_SIZE, THREAT_ICON_SIZE], iconAnchor: [THREAT_ICON_SIZE / 2, THREAT_ICON_SIZE / 2],
+      html: threatIconHtml(kind, heading, advisory) });
+    const point = [Number(threat.lat), Number(threat.lon)];
+    let item = previous.get(id);
+    previous.delete(id);
+    if (item && item.kind !== kind) { threatLayer.removeLayer(item.layer); item = null; }
+    if (!item) {
+      const layer = kind ? L.marker(point, { pane: 'threats', title, icon: icon() })
+        : L.circleMarker(point, { pane: 'threats', radius: advisory ? 4 : 5.5, color,
+          weight: 2, fillColor: color, fillOpacity: advisory ? 0.36 : 0.65, dashArray: approximate ? '3 3' : null });
+      item = { id, kind, layer: layer.addTo(threatLayer) };
+    } else {
+      const old = item.layer.getLatLng();
+      if (old.lat !== point[0] || old.lng !== point[1]) item.layer.setLatLng(point);
+      if (item.iconSignature !== iconSignature) {
+        if (kind) item.layer.setIcon(icon());
+        else item.layer.setStyle({ color, fillColor: color, fillOpacity: advisory ? 0.36 : 0.65,
+          dashArray: approximate ? '3 3' : null }).setRadius(advisory ? 4 : 5.5);
+      }
+    }
+    if (item.layer.getElement()) item.layer.getElement().title = title;
     const quality = approximate ? 'Приблизне місце' : 'Повідомлене місце';
-    const uncertainty = Number(threat.uncertaintyKm) > 0
-      ? ` · похибка до ${escapeHtml(threat.uncertaintyKm)} км` : '';
+    const uncertainty = Number(threat.uncertaintyKm) > 0 ? ` · похибка до ${escapeHtml(threat.uncertaintyKm)} км` : '';
     const category = advisory ? 'Спостереження' : 'Загроза';
     const course = heading == null ? '' : `<br><small>Орієнтовний курс: ${Math.round(heading)}° від півночі</small>`;
-    const motion = predictedPosition !== null;
-    const motionNote = motion ? '<br><small>Рух значка — обмежена візуальна оцінка за курсом, не нове спостереження.</small>' : '';
-    marker.bindPopup(`<strong>${escapeHtml(threat.title || category)}</strong><br>${category} · ${quality}${uncertainty}${course}${motionNote}<br>${escapeHtml(threat.region || '')}<br><small>Джерело: NEPTUN · ${escapeHtml(threat.updatedAt || '')}</small>`);
-    threatVisuals.push({ layer: marker, key: regionKey(threat.region), threat, observedAtMs, motion });
+    const popup = `<strong>${escapeHtml(threat.title || category)}</strong><br>${category} · ${quality}${uncertainty}${course}<br>${escapeHtml(threat.region || '')}<br><small>Джерело: NEPTUN · ${escapeHtml(threat.updatedAt || '')}</small>`;
+    if (item.popup !== popup) {
+      if (item.layer.getPopup()) item.layer.setPopupContent(popup);
+      else item.layer.bindPopup(popup);
+    }
+    Object.assign(item, { key: regionKey(threat.region), threat, iconSignature, popup });
+    next.push(item);
   }
+  for (const item of previous.values()) threatLayer.removeLayer(item.layer);
+  threatVisuals = next;
   updateFocusOverlays();
   setStatus();
   renderSelectedCard();
@@ -860,7 +909,7 @@ function addLabels() {
     }).addTo(map);
     labelMarkers.set(code, marker);
   }
-  map.on('moveend zoomend zoom resize', scheduleLabelLayout);
+  map.on('moveend resize', scheduleLabelLayout);
   document.fonts.ready.then(layoutLabels);
   requestAnimationFrame(layoutLabels);
 }
@@ -871,9 +920,13 @@ function normalizeSearch(value) {
 
 function updateSettlements() {
   if (!settlementLayer || !settlementPlaces.length) return;
-  settlementLayer.clearLayers();
+  const wanted = new Set();
   const zoom = map.getZoom();
-  if (zoom < 7) return;
+  if (zoom < 7) {
+    for (const marker of settlementMarkers.values()) settlementLayer.removeLayer(marker);
+    settlementMarkers.clear();
+    return;
+  }
   const minimumPopulation = zoom < 8 ? 20000 : zoom < 9 ? 5000 :
     zoom < 10 ? 1000 : zoom < 11 ? 250 : zoom < 12 ? 50 : 0;
   const bounds = map.getBounds().pad(0.04);
@@ -893,10 +946,19 @@ function updateSettlements() {
     if (occupied.some(other => box.left < other.right + 7 && box.right > other.left - 7 &&
         box.top < other.bottom + 5 && box.bottom > other.top - 5)) continue;
     occupied.push(box);
-    const icon = L.divIcon({ className: `settlement-label-icon${place[3] >= 100000 ? ' major' : ''}`,
-      iconSize: [0, 0], html: `<span class="settlement-label-text">${escapeHtml(place[0])}</span>` });
-    L.marker([place[1], place[2]], { icon, pane: 'settlements', interactive: false, keyboard: false }).addTo(settlementLayer);
+    wanted.add(place);
+    if (!settlementMarkers.has(place)) {
+      const icon = L.divIcon({ className: `settlement-label-icon${place[3] >= 100000 ? ' major' : ''}`,
+        iconSize: [0, 0], html: `<span class="settlement-label-text">${escapeHtml(place[0])}</span>` });
+      const marker = L.marker([place[1], place[2]], { icon, pane: 'settlements', interactive: false, keyboard: false }).addTo(settlementLayer);
+      settlementMarkers.set(place, marker);
+    }
     shown++;
+  }
+  for (const [place, marker] of settlementMarkers) {
+    if (wanted.has(place)) continue;
+    settlementLayer.removeLayer(marker);
+    settlementMarkers.delete(place);
   }
 }
 
@@ -905,7 +967,7 @@ function scheduleSettlements() {
   if (settlementUpdateFrame) return;
   settlementUpdateFrame = requestAnimationFrame(() => {
     settlementUpdateFrame = 0;
-    updateSettlements();
+    if (!mapMoving) updateSettlements();
   });
 }
 
@@ -1138,8 +1200,9 @@ async function init() {
     addLabels();
     addExternalRegions();
     loadSettlements();
-    map.on('zoomend moveend resize', updateExternalLabels);
-    map.on('zoomend moveend resize', scheduleSettlements);
+    map.on('movestart zoomstart', () => { mapMoving = true; });
+    map.on('moveend', () => { mapMoving = false; flushMapUpdates(); });
+    map.on('resize', flushMapUpdates);
     $('mapStyleToggle').onclick = () => setMapStyle(mapStyle === 'dark' ? 'satellite' : 'dark');
     try {
       if (localStorage.getItem('obriy-map-style') === 'dark') setMapStyle('dark');
@@ -1160,13 +1223,15 @@ async function init() {
     });
     await refreshLiveData();
     connectRealtimeStream();
+    loadCivilBulletins();
+    setInterval(loadCivilBulletins, 15000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) loadCivilBulletins(); });
     setInterval(() => {
       if (!realtimeConnected || Date.now() - lastStreamMessageMs > 45000) {
         if (realtimeSocket && Date.now() - lastStreamMessageMs > 45000) realtimeSocket.close();
         refreshLiveData();
       }
     }, POLL_INTERVAL_MS);
-    setInterval(animateThreatMarkers, MOTION_INTERVAL_MS);
   } catch (error) {
     $('topStatus').textContent = 'Не вдалося завантажити межі карти';
     $('sourceStatus').textContent = 'Перевірте локальний сервер і файли геоданих';

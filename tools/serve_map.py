@@ -1,4 +1,4 @@
-"""Serve the local map and a private, manual Telegram review journal."""
+"""Serve the local map and private regional bulletins and a Telegram review journal."""
 
 import argparse
 import json
@@ -48,9 +48,11 @@ class ReviewHandler(SimpleHTTPRequestHandler):
         store = self.server.review_store
         if path == '/api/review/status':
             return self.json_response({**store.status(), 'csrfToken': self.server.review_token})
+        if path == '/api/review/bulletins':
+            return self.json_response(store.bulletins())
         if path == '/api/review/messages':
             query = parse_qs(urlsplit(self.path).query)
-            return self.json_response(store.messages(query.get('state', [''])[0], query.get('source', [''])[0], query.get('q', [''])[0][:200]))
+            return self.json_response(store.messages(query.get('state', [''])[0], query.get('source', [''])[0], query.get('q', [''])[0][:200], query.get('routing', [''])[0]))
         parts = path.strip('/').split('/')
         if len(parts) == 5 and parts[:3] == ['api', 'review', 'messages'] and parts[4].isdigit():
             item = store.detail(parts[3], int(parts[4]))

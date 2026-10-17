@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="./vendor/leaflet.css" />
-  <link rel="stylesheet" href="./styles.css?v=44" />
+  <link rel="stylesheet" href="./styles.css?v=45" />
 </head>
 <body>
   <main class="app">
@@ -32,7 +32,7 @@
     </header>
     <aside id="helpPanel" class="help-panel" hidden>
       <div class="help-head"><strong>Як читати карту</strong><button id="helpClose" aria-label="Закрити довідку">×</button></div>
-      <p><a href="./review.html">Журнал джерел Telegram ↗</a></p>
+      <p><a href="./review.html">Журнал джерел Telegram ↗</a></p><p class="help-muted">Короткі повідомлення про тривогу й відбій автоматично збираються у зведення вибраної області. Неясні дописи залишаються на перевірку. Кольори тривог і позначки на карті поки надходять із NEPTUN.</p>
       <p>Натисніть область, щоб наблизити її та побачити райони з тривогою й об’єкти загроз. Закрийте панель або натисніть огляд, щоб повернути всю Україну. При наближенні з’являються міста й села; їх можна знайти через пошук.</p>
       <div class="legend-row"><i class="legend-yellow"></i><span>Жовтий рівень тривоги</span></div>
       <div class="legend-row"><i class="legend-red"></i><span>Червоний рівень тривоги</span></div>
@@ -47,13 +47,13 @@
         <span><span class="threat-icon"><img class="threat-art" src="./assets/threat-icons/kab.png" alt=""></span>КАБ</span>
         <span><span class="threat-icon"><img class="threat-art" src="./assets/threat-icons/su35.png" alt=""><img class="threat-payload" src="./assets/threat-icons/kab.png" alt=""></span>Су-35 + КАБ</span>
       </div>
-      <p class="help-muted">Модель літака показується лише коли її названо в повідомленні. БпЛА плавно зсуваються за свіжим курсом не більш ніж на 2 км від повідомленої точки. Це візуальна оцінка, а не нове підтвердження місця.</p>
+      <p class="help-muted">Модель літака показується лише коли її названо в повідомленні. Показано останню отриману позицію; значок не прогнозує переміщення між повідомленнями.</p>
     </aside>
     <div class="zoom-controls"><button id="zoomIn" aria-label="Наблизити">+</button><button id="zoomOut" aria-label="Віддалити">−</button></div>
     <aside id="regionCard" class="region-card" aria-labelledby="regionPanelTitle" hidden></aside>
     <div class="source-note"><a href="https://neptun.in.ua/" target="_blank" rel="noopener noreferrer">Дані про тривоги й загрози: NEPTUN ↗</a><span id="sourceStatus">Підключення до даних…</span><small>Інформаційна карта. Перевіряйте офіційні сигнали тривоги.</small></div>
   </main>
   <script src="./vendor/leaflet.js"></script>
-  <script src="./script.js?v=46"></script>
+  <script src="./script.js?v=47"></script>
 </body>
 </html>

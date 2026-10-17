@@ -2,6 +2,7 @@
 const $ = id => document.getElementById(id);
 const categoryNames = {alert:'Повітряна тривога',clear:'Відбій тривоги',other:'Інше',uncertain:'Потрібно уточнити'};
 const stateNames = {pending:'На перевірці',approved:'Підтверджено',rejected:'Відхилено'};
+const routingNames = {automatic:'Автоматично',review:'Потрібно уточнити',archive:'Архів',manual:'Рішення користувача'};
 let csrfToken = '';
 let selected = null;
 let dirty = false;
@@ -38,13 +39,15 @@ async function loadStatus() {
   const cards=data.sources.map(source=>{
     const card=node('article','source-card'); const top=node('div','source-top');
     const link=node('a','source-name','@'+source.username); link.href=source.url;link.target='_blank';link.rel='noopener noreferrer';
-    const ok=source.last_success&&!source.error;
-    top.append(link,node('span','source-state'+(ok?' ok':''),source.error?'Немає зв’язку':ok?'Доступний':'Перша перевірка'));
+    const fresh=source.last_success&&Date.now()-Date.parse(source.last_success)<data.pollIntervalSeconds*3000;
+    const ok=fresh&&!source.error;
+    top.append(link,node('span','source-state'+(ok?' ok':''),source.error?'Немає зв’язку':ok?'Доступний':source.last_success?'Давно не оновлено':'Перша перевірка'));
     card.append(top,node('p','',source.error||'Остання успішна перевірка: '+time(source.last_success)),node('p','',source.name+' · '+(source.message_count||0)+' дописів у поточному вебперегляді'));
     return card;
   });
   $('sources').replaceChildren(...cards);$('coverage').textContent=data.coverage;
-  $('counts').textContent=(data.counts.pending||0)+' на перевірці';
+  $('counts').textContent=(data.routingCounts.review||0)+' потребують уточнення · '+(data.routingCounts.automatic||0)+' автоматично';
+  $('automation').textContent=(data.collectorRunning?'Автоматичний збір кожні '+data.pollIntervalSeconds+' с. ':'Фоновий збір зупинений. Запусти карту стандартним ярликом. ')+data.automation;
   const sourceSelect=$('sourceFilter');const old=sourceSelect.value;
   const signature=data.sources.map(s=>s.username).join(',');
   if(signature!==sourceOptionsSignature) {
@@ -59,18 +62,19 @@ async function loadStatus() {
 }
 async function loadList() {
   const request=++listRequest;
-  const params=new URLSearchParams({state:$('stateFilter').value,source:$('sourceFilter').value,q:$('queryFilter').value});
+  const filter=$('stateFilter').value;
+  const params=new URLSearchParams({state:filter.startsWith('route:')?'':filter,routing:filter.startsWith('route:')?filter.slice(6):'',source:$('sourceFilter').value,q:$('queryFilter').value});
   const data=await api('messages?'+params);
   if(request!==listRequest) return;
   $('messageCount').textContent=data.total>150?'150 із '+data.total:String(data.total);
-  const signature=JSON.stringify([selected?.channel,selected?.id,data.messages.map(item=>[item.channel,item.id,item.revision,item.category,item.regions,item.review_state])]);
+  const signature=JSON.stringify([selected?.channel,selected?.id,data.messages.map(item=>[item.channel,item.id,item.revision,item.category,item.regions,item.review_state,item.routing])]);
   if(signature===lastListSignature) return;
   lastListSignature=signature;
   const list=$('messageList');const scroll=list.scrollTop;
   const entries=data.messages.map(item=>{
     const button=node('button','message-item'+(selected&&selected.channel===item.channel&&selected.id===item.id?' selected':''));button.type='button';
     const meta=node('span','message-meta');meta.append(node('span','','@'+item.channel),node('span','',time(item.published_at)));
-    const tags=node('span','tags');tags.append(node('span','tag '+item.category,categoryNames[item.category]),node('span','tag',stateNames[item.review_state]));
+    const tags=node('span','tags');tags.append(node('span','tag '+item.category,categoryNames[item.category]),node('span','tag',item.review_state==='pending'?routingNames[item.routing]:stateNames[item.review_state]));
     if(item.revision>1) tags.append(node('span','tag','Версія '+item.revision));
     if(item.regions.length) tags.append(node('span','tag',item.regions.join(', ')));
     button.append(meta,node('span','message-preview',item.text||'Медіадопис без тексту'),tags);
@@ -78,7 +82,7 @@ async function loadList() {
     if(selected&&selected.channel===item.channel&&selected.id===item.id&&selected.revision!==item.revision) $('newRevision').hidden=false;
     return button;
   });
-  list.replaceChildren(...(entries.length?entries:[node('p','empty-list','Дописів за цим фільтром поки немає. Перевір доступність каналів або зміни фільтр.')]));list.scrollTop=scroll;
+  list.replaceChildren(...(entries.length?entries:[node('p','empty-list',filter==='route:review'?'Уточнень не потрібно. Нові дописи оброблятимуться автоматично.':'Дописів за цим фільтром поки немає.')]));list.scrollTop=scroll;
 }
 async function selectMessage(channel,id,force=false) {
   if(dirty&&!force&&!window.confirm('Є незбережені зміни перевірки. Перейти до іншого допису?')) return;
@@ -88,12 +92,12 @@ async function selectMessage(channel,id,force=false) {
     if(request!==detailRequest) return;
     selected=item;dirty=false;
     $('emptyDetail').hidden=true;$('detailContent').hidden=false;$('newRevision').hidden=true;
-    $('detailSource').textContent=(sourceNames.get(channel)||channel)+' / '+id+' / '+stateNames[item.review_state];
+    $('detailSource').textContent=(sourceNames.get(channel)||channel)+' / '+id+' / '+(item.review_state==='pending'?routingNames[item.routing]:stateNames[item.review_state]);
     $('originalLink').href=item.url;
     const times=[['Опубліковано · час Києва',item.published_at],['Уперше отримано',item.first_seen_at],['Цю версію отримано',item.revisions[0].received_at],['Остання перевірка',item.reviewed_at]];
     $('messageTimes').replaceChildren(...times.map(([title,value])=>{const box=node('div');box.append(node('dt','',title),node('dd','',time(value)));return box;}));
     $('originalText').textContent=item.text||'Допис містить медіа без тексту. Переглянь його в Telegram.';
-    $('suggestionReason').textContent='Початкова підказка: '+item.reason;
+    $('suggestionReason').textContent=item.routing_reason+(item.routing==='review'?' '+item.reason:'');
     $('category').value=item.category;$('reviewNote').value=item.note;
     document.querySelectorAll('input[name=region]').forEach(box=>box.checked=item.regions.includes(box.value));
     $('revisionCount').textContent=String(item.revisions.length);

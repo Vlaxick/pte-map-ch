@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#10191c">
+  <title>Журнал джерел · Обрій</title>
+  <link rel="stylesheet" href="./review.css?v=1">
+  <script src="./review.js?v=1" defer></script>
+</head>
+<body>
+  <main class="review-app">
+    <header class="page-head"><div><a class="back" href="/">← До карти</a><p class="eyebrow">Обрій / Джерела</p><h1>Журнал повідомлень</h1><p class="intro">Оригінальний допис, попередня категорія та рішення після перевірки.</p></div><button id="refreshSources" type="button">Перевірити канали ↻</button></header>
+    <div id="notice" role="status" class="notice" hidden></div>
+    <section id="sources" class="sources" aria-label="Доступність каналів"></section>
+    <p id="coverage" class="coverage"></p>
+    <div class="workspace">
+      <section class="inbox panel" aria-label="Список дописів">
+        <div class="inbox-head"><h2>Дописів <span id="messageCount">0</span></h2><p id="counts"></p></div>
+        <div class="filters"><label>Рішення<select id="stateFilter"><option value="pending">На перевірці</option><option value="approved">Підтверджені</option><option value="rejected">Відхилені</option><option value="">Усі дописи</option></select></label><label>Канал<select id="sourceFilter"><option value="">Усі канали</option></select></label><label class="search-label">Пошук у тексті<input id="queryFilter" type="search" placeholder="Слово або фраза" maxlength="200"></label></div>
+        <div id="messageList" class="message-list" aria-label="Дописи"></div>
+      </section>
+      <section class="detail panel" aria-label="Перевірка допису">
+        <div id="emptyDetail" class="empty-detail"><span aria-hidden="true">↖</span><h2>Вибери допис</h2><p>Перевір текст і час, уточни категорію та область. Рішення збережеться в історії.</p><p class="quiet">Журнал поки не змінює стан карти.</p></div>
+        <div id="detailContent" hidden>
+          <div class="detail-head"><div><p class="eyebrow" id="detailSource"></p><h2>Перевірка допису</h2></div><a id="originalLink" target="_blank" rel="noopener noreferrer">У Telegram ↗</a></div>
+          <dl id="messageTimes" class="times"></dl>
+          <div id="newRevision" class="notice" hidden>Є нова версія допису. <button id="reloadDetail" type="button">Завантажити її</button></div>
+          <article id="originalText" class="original-text" aria-label="Оригінальний текст"></article>
+          <p id="suggestionReason" class="quiet"></p>
+          <form id="reviewForm">
+            <label>Категорія<select id="category"><option value="alert">Повітряна тривога</option><option value="clear">Відбій повітряної тривоги</option><option value="other">Інше повідомлення</option><option value="uncertain">Потрібно уточнити</option></select></label>
+            <fieldset><legend>Області, прямо зазначені в дописі</legend><div id="regionChoices" class="region-choices"></div></fieldset>
+            <label>Коментар до перевірки<textarea id="reviewNote" rows="3" maxlength="3000" placeholder="Що було уточнено або чому допис відхилено"></textarea></label>
+            <div class="review-actions"><button type="submit" name="decision" value="approved" class="primary">Підтвердити</button><button type="submit" name="decision" value="rejected">Відхилити</button><button type="submit" name="decision" value="pending">Залишити на перевірці</button></div>
+          </form>
+          <details id="revisionHistory"><summary>Версії допису <span id="revisionCount"></span></summary><div id="revisionList"></div></details>
+          <details><summary>Історія перевірок <span id="reviewCount"></span></summary><div id="reviewHistory"></div></details>
+        </div>
+      </section>
+    </div>
+    <footer>Попередня категорія потребує перевірки. Повітряна тривога та відбій визначаються офіційними повідомленнями.</footer>
+  </main>
+</body>
+</html>

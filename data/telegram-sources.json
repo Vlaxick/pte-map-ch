@@ -1,0 +1,7 @@
+{
+  "pollIntervalSeconds": 60,
+  "sources": [
+    {"username": "monitoring_zaxid", "name": "Моніторинг заходу", "enabled": true},
+    {"username": "zahid_24_7", "name": "Захід 24/7", "enabled": true}
+  ]
+}
